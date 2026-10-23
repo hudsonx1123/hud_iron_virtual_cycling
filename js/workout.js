@@ -74,9 +74,12 @@ function parseZwo(text) {
   return { name, segs: segs.filter((s) => s.d > 0) };
 }
 
-// MRC：[COURSE DATA] 每行 "分鐘 %FTP"；ERG（瓦特）則以 ftp 換算
+// MRC：[COURSE DATA] 每行 "分鐘 %FTP"；ERG（瓦特）以檔頭的 FTP 換算（沒有才用 App 的 FTP）
 function parseMrc(name, text, ftp) {
   const isWatts = /\bWATTS\b/i.test(text) && !/\bPERCENT\b/i.test(text);
+  const fileFtp = +(text.match(/^\s*FTP\s*=\s*(\d+(?:\.\d+)?)/im)?.[1] || 0);
+  const desc = text.match(/^\s*DESCRIPTION\s*=\s*(.+)$/im)?.[1]?.trim();
+  if (isWatts && fileFtp) ftp = fileFtp;
   const pts = [];
   let inData = false;
   for (const line of text.split(/\r?\n/)) {
@@ -91,7 +94,7 @@ function parseMrc(name, text, ftp) {
     const d = pts[i + 1][0] - pts[i][0];
     if (d > 0) segs.push({ d, a: pts[i][1], b: pts[i + 1][1] });
   }
-  return { name: name.replace(/\.[^.]+$/, ''), segs };
+  return { name: desc || name.replace(/\.[^.]+$/, ''), segs, ftp: isWatts ? ftp : fileFtp || null };
 }
 
 export function parseWorkoutFile(filename, text, ftp) {
@@ -102,5 +105,8 @@ export function parseWorkoutFile(filename, text, ftp) {
   else if (ext === 'json') w = JSON.parse(text);
   else throw new Error('不支援的格式：' + ext);
   if (!w.segs?.length) throw new Error('課表內沒有可用的區段');
-  return build(w.name || filename, w.segs);
+  return { ...build(w.name || filename, w.segs), ftp: w.ftp || null };
 }
+
+// 檔名開頭的日期（TrainingPeaks 匯出格式：2026-10-24_BikeLongAe.erg）
+export const dateFromName = (name) => name.match(/^(\d{4}-\d{2}-\d{2})/)?.[1] || null;

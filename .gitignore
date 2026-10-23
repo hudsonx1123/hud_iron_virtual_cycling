@@ -10,3 +10,7 @@ node_modules/
 
 # 下載快取
 .cache/
+
+# 個人課表（自動載入用，不公開）
+workout/*
+!workout/.gitkeep

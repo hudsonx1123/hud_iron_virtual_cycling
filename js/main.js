@@ -1,6 +1,6 @@
 import { Trainer, HRMonitor, bleSupported } from './ble.js';
 import { World } from './world.js';
-import { SAMPLES, parseWorkoutFile, targetAt, totalTSS } from './workout.js';
+import { SAMPLES, parseWorkoutFile, targetAt, totalTSS, dateFromName } from './workout.js';
 
 const $ = (id) => document.getElementById(id);
 const store = (k, v) => { try { localStorage[k] = JSON.stringify(v); } catch {} };
@@ -217,18 +217,50 @@ $('btnPanel').onclick = () => $('panel').classList.toggle('open');
 $('ftp').value = S.ftp;
 $('ftp').onchange = (e) => { S.ftp = Math.max(50, +e.target.value || 200); store('ftp', S.ftp); };
 $('impDate').value = dateKey(new Date());
+// 課表檔的 FTP 與 App 不同時，詢問是否改用檔案的 FTP（ERG 檔的瓦特數依此換算）
+function checkFtp(w, file) {
+  if (!w.ftp || w.ftp === S.ftp) return;
+  if (confirm(`${file} 的 FTP 是 ${w.ftp}W，App 目前是 ${S.ftp}W。\n要把 FTP 改成 ${w.ftp}W 嗎？\n（不改的話，課表目標功率會依 ${S.ftp}W 等比例調整）`)) {
+    S.ftp = w.ftp; store('ftp', S.ftp); $('ftp').value = S.ftp;
+  }
+}
+
+function addWorkout(file, text, date) {
+  const w = parseWorkoutFile(file, text, S.ftp);
+  S.sched = S.sched.filter((e) => e.file !== file); // 同檔名覆蓋
+  S.sched.push({ date: dateFromName(file) || date, w, file });
+  return w;
+}
+
 $('impFile').onchange = async (e) => {
   for (const f of e.target.files) {
-    try {
-      const w = parseWorkoutFile(f.name, await f.text(), S.ftp);
-      S.sched.push({ date: $('impDate').value || dateKey(new Date()), w });
-    } catch (err) { alert(`${f.name}：${err.message}`); }
+    try { checkFtp(addWorkout(f.name, await f.text(), $('impDate').value || dateKey(new Date())), f.name); }
+    catch (err) { alert(`${f.name}：${err.message}`); }
   }
   store('sched', S.sched);
   e.target.value = '';
   S.tab = 'today';
   renderList();
 };
+
+// 自動讀取 workout/ 資料夾（依本機伺服器的目錄列表）；新檔或內容改變才加入
+async function scanWorkoutFolder() {
+  let html;
+  try { const r = await fetch('workout/', { cache: 'no-store' }); if (!r.ok) return; html = await r.text(); } catch { return; }
+  const files = [...html.matchAll(/href="([^"?]+\.(?:erg|mrc|zwo|json))"/gi)].map((m) => decodeURIComponent(m[1]));
+  const seen = load('folderSeen', {});
+  let added = 0;
+  for (const f of files) {
+    try {
+      const text = await (await fetch('workout/' + encodeURIComponent(f), { cache: 'no-store' })).text();
+      if (seen[f] === text.length + ':' + text.slice(-64)) continue;
+      checkFtp(addWorkout(f, text, dateKey(new Date())), f);
+      seen[f] = text.length + ':' + text.slice(-64);
+      added++;
+    } catch (err) { console.warn('workout file', f, err); }
+  }
+  if (added) { store('sched', S.sched); store('folderSeen', seen); renderList(); setStatus(`已從 workout 資料夾載入 ${added} 個課表`); }
+}
 
 // ---------- 視角 / 快捷鍵 ----------
 const world = new World($('c'));
@@ -271,6 +303,7 @@ function frame(now) {
 
 selectWorkout(null);
 renderList();
+scanWorkoutFolder();
 
 // 測試參數：?sim=1&view=side&hud=0&start=1
 const params = new URLSearchParams(location.search);
