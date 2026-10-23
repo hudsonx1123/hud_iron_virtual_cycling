@@ -50,6 +50,7 @@
     transition: transform .25s; background: rgba(8,12,20,.94); padding: 2vmin; overflow: auto; z-index: 5; font-size: 2.2vmin; }
   #panel.open { transform: none; }
   #panel h3 { margin: 0 0 1vmin; font-size: 3vmin; }
+  #btnPanelClose { position: absolute; top: 1.2vmin; right: 1.2vmin; padding: 0.8vmin 1.6vmin; font-size: 2.6vmin; }
   .tabs { display: flex; gap: .6vmin; margin-bottom: 1vmin; }
   .tabs button { flex: 1; padding: 1vmin; font-size: 2.1vmin; }
   .item { padding: 1.2vmin; border-radius: 1vmin; background: rgba(255,255,255,.07); margin-bottom: .8vmin; cursor: pointer; display: flex; justify-content: space-between; gap: 1vmin; }
@@ -111,6 +112,7 @@
 </div>
 
 <aside id="panel">
+  <button id="btnPanelClose" title="關閉（Esc）">✕</button>
   <h3>課表</h3>
   <div class="row">FTP <input type="number" id="ftp" min="50" max="600"> W</div>
   <div class="tabs">

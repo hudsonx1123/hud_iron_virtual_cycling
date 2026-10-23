@@ -201,7 +201,7 @@ function renderList() {
     info.innerHTML = `<b></b><small>${e ? e.date + ' · ' : ''}${Math.round(w.total / 60)} 分 · TSS≈${totalTSS(w)}</small>`;
     info.firstChild.textContent = w.name;
     div.append(info);
-    div.onclick = () => selectWorkout(w);
+    div.onclick = () => { selectWorkout(w); closePanel(); };
     if (e) {
       const x = document.createElement('span');
       x.className = 'x'; x.textContent = '✕';
@@ -213,7 +213,12 @@ function renderList() {
 }
 
 document.querySelectorAll('[data-tab]').forEach((b) => (b.onclick = () => { S.tab = b.dataset.tab; renderList(); }));
-$('btnPanel').onclick = () => $('panel').classList.toggle('open');
+const panel = $('panel');
+const closePanel = () => panel.classList.remove('open');
+$('btnPanel').onclick = (e) => { e.stopPropagation(); panel.classList.toggle('open'); };
+$('btnPanelClose').onclick = closePanel;
+// 點側邊欄外面也會收起（側邊欄打開時會蓋住「課表」按鈕）
+document.addEventListener('pointerdown', (e) => { if (panel.classList.contains('open') && !panel.contains(e.target) && e.target !== $('btnPanel')) closePanel(); });
 $('ftp').value = S.ftp;
 $('ftp').onchange = (e) => { S.ftp = Math.max(50, +e.target.value || 200); store('ftp', S.ftp); };
 $('impDate').value = dateKey(new Date());
@@ -274,6 +279,7 @@ $('mapSel').onchange = (e) => { const u = new URL(location.href); u.searchParams
 if (world.map === 'yuanshan') $('osmCredit').style.display = 'block';
 const KEYS = ['back', 'side', 'front', 'front34', 'top'];
 addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') return closePanel();
   if (e.target.tagName === 'INPUT') return;
   if (e.key >= '1' && e.key <= '5') setView(KEYS[+e.key - 1]);
   else if (e.code === 'Space') { e.preventDefault(); toggleRun(); }
