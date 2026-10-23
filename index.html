@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hud Iron Virtual Cycling</title>
+<style>
+  :root { --bg: rgba(10,14,22,.7); --fg: #fff; --dim: #aeb9c7; --accent: #3ddc84; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #000; color: var(--fg);
+    font-family: -apple-system, "SF Pro Display", "PingFang TC", "Noto Sans TC", sans-serif; }
+  canvas#c { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+  .tile { background: var(--bg); border-radius: 1.6vmin; padding: 1vmin 2vmin; }
+  .tile label { display: block; font-size: 2.2vmin; letter-spacing: .1em; color: var(--dim); }
+  .tile b { display: block; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1;
+    text-shadow: 0 .4vmin 1.2vmin rgba(0,0,0,.6); }
+  .tile b small { font-size: .32em; color: var(--dim); font-weight: 600; margin-left: .3em; }
+
+  #top { position: fixed; top: 1.5vmin; left: 1.5vmin; right: 1.5vmin; display: flex; gap: 1.5vmin; align-items: stretch; justify-content: space-between; }
+  #top .tile b { font-size: 7vmin; }
+  #stepbox { flex: 1; text-align: center; }
+  #wname { font-size: 2.6vmin; color: var(--dim); }
+  #step { font-size: 5.2vmin; font-weight: 800; font-variant-numeric: tabular-nums; }
+  #stepNext { font-size: 2.6vmin; color: var(--dim); }
+
+  #left { position: fixed; left: 1.5vmin; top: 20vmin; }
+  #power b { font-size: 19vmin; }
+  #target { font-size: 4vmin; font-weight: 700; margin-top: .8vmin; font-variant-numeric: tabular-nums; }
+  #target span { color: var(--accent); }
+  #adj { display: flex; gap: 1vmin; margin-top: 1.2vmin; }
+
+  #right { position: fixed; right: 1.5vmin; top: 20vmin; display: flex; flex-direction: column; gap: 1.5vmin; min-width: 30vmin; text-align: right; }
+  #right .tile b { font-size: 11vmin; }
+
+  #bottom { position: fixed; left: 1.5vmin; right: 1.5vmin; bottom: 1.5vmin; display: flex; flex-direction: column; gap: 1vmin; }
+  #chart { width: 100%; height: 9vmin; background: var(--bg); border-radius: 1.2vmin; display: block; }
+  #bar { display: flex; gap: 1vmin; flex-wrap: wrap; align-items: center; }
+  button, select, input { font: inherit; }
+  button { background: var(--bg); color: var(--fg); border: 0; border-radius: 1vmin; padding: 1.2vmin 2vmin;
+    font-size: 2.4vmin; font-weight: 700; cursor: pointer; }
+  button:hover { background: rgba(60,70,90,.8); }
+  button.on { background: var(--accent); color: #04210f; }
+  button.big { font-size: 3.4vmin; padding: 1.2vmin 3.4vmin; background: var(--accent); color: #04210f; }
+  .sp { flex: 1; }
+  body.nohud #top, body.nohud #left, body.nohud #right, body.nohud #bottom { display: none; }
+  #status { font-size: 2vmin; color: var(--dim); }
+
+  #panel { position: fixed; top: 0; right: 0; bottom: 0; width: min(46vmin, 92vw); transform: translateX(105%);
+    transition: transform .25s; background: rgba(8,12,20,.94); padding: 2vmin; overflow: auto; z-index: 5; font-size: 2.2vmin; }
+  #panel.open { transform: none; }
+  #panel h3 { margin: 0 0 1vmin; font-size: 3vmin; }
+  .tabs { display: flex; gap: .6vmin; margin-bottom: 1vmin; }
+  .tabs button { flex: 1; padding: 1vmin; font-size: 2.1vmin; }
+  .item { padding: 1.2vmin; border-radius: 1vmin; background: rgba(255,255,255,.07); margin-bottom: .8vmin; cursor: pointer; display: flex; justify-content: space-between; gap: 1vmin; }
+  .item:hover, .item.sel { background: rgba(61,220,132,.25); }
+  .item small { color: var(--dim); display: block; }
+  .item .x { color: #ff7b7b; }
+  .row { display: flex; gap: 1vmin; align-items: center; margin: 1vmin 0; flex-wrap: wrap; }
+  input[type=number], input[type=date] { background: #1b2230; color: #fff; border: 1px solid #38445a; border-radius: .8vmin; padding: .8vmin 1vmin; font-size: 2.2vmin; }
+  input[type=number] { width: 11vmin; }
+  .hint { color: var(--dim); font-size: 1.9vmin; line-height: 1.5; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="top">
+  <div class="tile"><label>現在時間</label><b id="clock">--:--</b></div>
+  <div class="tile" id="stepbox">
+    <div id="wname">自由騎乘 · ERG</div>
+    <div id="step">--</div>
+    <div id="stepNext"></div>
+  </div>
+  <div class="tile"><label>騎乘時間</label><b id="elapsed">00:00:00</b></div>
+  <div class="tile"><label>距離 KM</label><b id="distV">0.00</b></div>
+</div>
+
+<div id="left">
+  <div class="tile" id="power"><label>功率 POWER</label><b id="powerV">--<small>W</small></b></div>
+  <div class="tile" id="target">ERG 目標 <span id="tgt">--</span> W</div>
+  <div id="adj">
+    <button data-adj="-10">−10W</button><button data-adj="-5">−5</button>
+    <button data-adj="5">+5</button><button data-adj="10">+10W</button>
+  </div>
+</div>
+
+<div id="right">
+  <div class="tile"><label>心率 HEART RATE</label><b id="hrV">--<small>bpm</small></b></div>
+  <div class="tile"><label>踏頻 CADENCE</label><b id="cadV">--<small>rpm</small></b></div>
+  <div class="tile"><label>速度 SPEED</label><b id="spdV">--<small>km/h</small></b></div>
+</div>
+
+<div id="bottom">
+  <canvas id="chart"></canvas>
+  <div id="bar">
+    <button class="big" id="btnStart">▶ 開始</button>
+    <button id="btnTrainer">🔌 連接訓練台</button>
+    <button id="btnHR">❤ 連接心率帶</button>
+    <button id="btnSim">模擬模式</button>
+    <span id="status"></span>
+    <span class="sp"></span>
+    <button data-view="back" class="on">後方 1</button>
+    <button data-view="side">側邊 2</button>
+    <button data-view="front">前方 3</button>
+    <button data-view="front34">前斜 4</button>
+    <button data-view="top">上空 5</button>
+    <button id="btnPanel">📅 課表</button>
+  </div>
+</div>
+
+<aside id="panel">
+  <h3>課表</h3>
+  <div class="row">FTP <input type="number" id="ftp" min="50" max="600"> W</div>
+  <div class="tabs">
+    <button data-tab="today">今天</button><button data-tab="tomorrow">明天</button>
+    <button data-tab="week">本週</button><button data-tab="sample">範例</button>
+  </div>
+  <div id="list"></div>
+  <h3 style="margin-top:2vmin">匯入課表</h3>
+  <div class="row">日期 <input type="date" id="impDate"></div>
+  <input type="file" id="impFile" accept=".zwo,.mrc,.erg,.json" multiple>
+  <p class="hint">在 TrainingPeaks 開啟課表 → 匯出為 .zwo 或 .mrc 後匯入。Garmin 的結構化課表之後再接 API。</p>
+</aside>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+} }
+</script>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

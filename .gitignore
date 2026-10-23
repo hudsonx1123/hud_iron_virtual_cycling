@@ -1,0 +1,9 @@
+# 機密：API 金鑰
+.env
+
+# 個人照片與由照片生成的模型（公開 repo 不上傳）
+work_folder/
+assets/models/rider/
+
+.DS_Store
+node_modules/
