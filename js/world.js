@@ -12,6 +12,7 @@ import { buildBike, WHEEL_R } from './bike.js';
 import { buildRider } from './rider.js';
 import { leafAtlas, broadleaf, conifer, bush } from './trees.js';
 import { loadRiderModel } from './riderModel.js';
+import { buildCity } from './city.js';
 
 // 世界座標：道路沿 +Z 無限延伸，車手組（rig）向 +Z 前進，地景以 100m 區塊循環重建。
 // 素材：Poly Haven（CC0）的 HDRI 天空、柏油/草地/林地 PBR 材質、草叢/蕨類/岩石模型。
@@ -33,6 +34,8 @@ const VIEWS = {
   modelFront: { pos: V(-0.3, 1.0, 2.6), look: V(0, 0.85, 0) },
   detailFront: { pos: V(-0.9, 1.25, 1.4), look: V(0, 0.95, 0.1) },
   scenery: { pos: V(-4, 2.2, -6), look: V(3, 2.0, 25) },
+  aerial: { pos: V(0, 260, -380), look: V(0, 0, 120) },
+  chase: { pos: V(-6, 14, -30), look: V(0, 2, 30) },
 };
 
 const smooth = (x) => { x = Math.min(1, Math.max(0, x)); return x * x * (3 - 2 * x); };
@@ -79,7 +82,9 @@ export class World {
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color('#9fb8cf');
     this.scene.fog = new THREE.FogExp2(new THREE.Color('#9fb8cf'), 0.0012);
-    this.camera = new THREE.PerspectiveCamera(50, 1, 0.05, 6000);
+    this.camera = new THREE.PerspectiveCamera(50, 1, 0.05, 25000);
+    this.map = new URLSearchParams(location.search).get('map') || 'mountain';
+    this.routeS = 0;
     this.sunDir = V(-0.5, 0.7, 0.3).normalize();
 
     this.buildLights();
@@ -281,6 +286,16 @@ export class World {
     this.rockVars = variants(rockG, 0, 1e9, true);
     for (const v of [...this.grassVars, ...this.fernVars]) { v.mat.transparent = false; v.mat.alphaTest = 0.5; v.mat.side = THREE.DoubleSide; }
 
+    if (this.map === 'yuanshan') {
+      // 真實地點：圓山交流道（OpenStreetMap）
+      this.scene.fog.density = 0.00045;
+      this.mountains.scale.set(9, 1.3, 9); // 台北盆地四周的山
+      this.mountains.material.fog = false;
+      this.farGround.visible = false;
+      this.city = await buildCity(this, ASSET + 'osm/yuanshan.json');
+      this.scene.traverse((o) => { for (const m of [].concat(o.material || [])) if ('envMapIntensity' in m && m.envMapIntensity === 1) m.envMapIntensity = 0.7; });
+      return;
+    }
     for (let i = 0; i < NCH; i++) this.chunks.push(this.buildChunk((i - 1) * CH + Math.floor(this.rig.position.z / CH) * CH));
   }
 
@@ -528,7 +543,9 @@ export class World {
     this.bike.update(this.crank, this.wheel);
     this.rider.update(this.crank);
 
-    const rz = (this.rig.position.z += speed * dt);
+    const route = this.city?.route;
+    if (route) this.followRoute(route, speed * dt);
+    const rz = route ? this.rig.position.z : (this.rig.position.z += speed * dt);
     for (const c of this.chunks) {
       if (c.z0 + CH < rz - CH) this.fillChunk(c, c.z0 + NCH * CH);
       const near = c.z0 + CH > rz - 40 && c.z0 < rz + 240; // 小型植被只在近處繪製，遠處已被霧遮住
@@ -538,12 +555,27 @@ export class World {
     const k = 1 - Math.exp(-dt * 4);
     this.camOff.lerp(this.view.pos, k);
     this.lookOff.lerp(this.view.look, k);
-    this.camera.position.copy(this.rig.position).add(this.camOff);
-    this.camera.lookAt(V().copy(this.rig.position).add(this.lookOff));
+    const q = route ? this.headingQ : null; // 城市模式：鏡頭跟著行進方向轉
+    this.camera.position.copy(this.rig.position).add(q ? this.camOff.clone().applyQuaternion(q) : this.camOff);
+    this.camera.lookAt(V().copy(this.rig.position).add(q ? this.lookOff.clone().applyQuaternion(q) : this.lookOff));
 
     this.sun.position.copy(this.rig.position).addScaledVector(this.sunDir, 90);
     this.sun.target.position.copy(this.rig.position);
-    if (this.mountains) this.mountains.position.z = this.farGround.position.z = rz;
+    if (this.mountains) {
+      this.mountains.position.set(route ? this.rig.position.x : 0, 0, rz);
+      this.farGround.position.z = rz;
+    }
+  }
+
+  // 沿路線前進；到終點後回到起點
+  followRoute(route, ds) {
+    this.routeS = (this.routeS + ds) % route.length;
+    const u = this.routeS / route.length;
+    const p = route.curve.getPointAt(u), t = route.curve.getTangentAt(u);
+    this.rig.position.copy(p);
+    const yaw = Math.atan2(t.x, t.z), pitch = -Math.atan2(t.y, Math.hypot(t.x, t.z));
+    this.rig.rotation.set(pitch, yaw, 0, 'YXZ');
+    (this.headingQ ||= new THREE.Quaternion()).setFromAxisAngle(V(0, 1, 0), yaw);
   }
 
   render() {

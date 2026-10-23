@@ -36,6 +36,7 @@
   #chart { width: 100%; height: 9vmin; background: var(--bg); border-radius: 1.2vmin; display: block; }
   #bar { display: flex; gap: 1vmin; flex-wrap: wrap; align-items: center; }
   button, select, input { font: inherit; }
+  #mapSel { background: var(--bg); color: var(--fg); border: 0; border-radius: 1vmin; padding: 1.2vmin 1.4vmin; font-size: 2.4vmin; font-weight: 700; }
   button { background: var(--bg); color: var(--fg); border: 0; border-radius: 1vmin; padding: 1.2vmin 2vmin;
     font-size: 2.4vmin; font-weight: 700; cursor: pointer; }
   button:hover { background: rgba(60,70,90,.8); }
@@ -105,6 +106,7 @@
     <button data-view="front34">前斜 4</button>
     <button data-view="top">上空 5</button>
     <button id="btnPanel">📅 課表</button>
+    <select id="mapSel" title="場景"><option value="mountain">🌲 山路</option><option value="yuanshan">🏙 圓山交流道</option></select>
   </div>
 </div>
 
@@ -122,6 +124,7 @@
   <p class="hint">在 TrainingPeaks 開啟課表 → 匯出為 .zwo 或 .mrc 後匯入。Garmin 的結構化課表之後再接 API。</p>
 </aside>
 
+<div id="osmCredit" style="display:none;position:fixed;right:1vmin;bottom:0.3vmin;font-size:1.4vmin;color:#fff;opacity:.7;text-shadow:0 0 3px #000">地圖資料 © OpenStreetMap contributors</div>
 <script type="importmap">
 { "imports": {
   "three": "https://unpkg.com/three@0.160.0/build/three.module.js",

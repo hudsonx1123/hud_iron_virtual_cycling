@@ -237,6 +237,9 @@ function setView(v, instant) {
   document.querySelectorAll('[data-view]').forEach((b) => b.classList.toggle('on', b.dataset.view === v));
 }
 document.querySelectorAll('[data-view]').forEach((b) => (b.onclick = () => setView(b.dataset.view)));
+$('mapSel').value = world.map;
+$('mapSel').onchange = (e) => { const u = new URL(location.href); u.searchParams.set('map', e.target.value); location.href = u; };
+if (world.map === 'yuanshan') $('osmCredit').style.display = 'block';
 const KEYS = ['back', 'side', 'front', 'front34', 'top'];
 addEventListener('keydown', (e) => {
   if (e.target.tagName === 'INPUT') return;
@@ -280,6 +283,7 @@ if (params.has('fps')) { // 效能量測：每 2 秒輸出平均 FPS 與繪製�
   const tick = () => { n++; const t = performance.now(); if (t - t0 > 2000) { const i = world.renderer.info.render; console.log('fps', (n * 1000 / (t - t0)).toFixed(1), 'dpr', world.dpr.toFixed(2), 'tris', i.triangles, 'calls', i.calls); n = 0; t0 = t; } requestAnimationFrame(tick); };
   requestAnimationFrame(tick);
 }
+if (params.has('route')) world.routeS = +params.get('route');
 if (params.has('crank')) world.crank = (+params.get('crank') * Math.PI) / 180;
 setStatus(bleSupported() ? '尚未連接裝置（可先用「模擬模式」預覽）' : '此瀏覽器不支援 Web Bluetooth，請用 Chrome / Edge');
 requestAnimationFrame(frame);

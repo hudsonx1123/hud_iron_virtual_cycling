@@ -7,3 +7,6 @@ assets/models/rider/
 
 .DS_Store
 node_modules/
+
+# 下載快取
+.cache/

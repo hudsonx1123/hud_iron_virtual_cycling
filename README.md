@@ -18,5 +18,11 @@ python3 -m http.server 8000
 
 快捷鍵：`1`–`5` 切換視角、空白鍵開始/暫停、上下方向鍵調整 ERG 目標 ±5W。
 
+## 場景
+- 🌲 山路：程式生成的無限延伸林蔭山路（預設）
+- 🏙 圓山交流道（實驗）：依 OpenStreetMap 資料生成的台北圓山交流道一帶，沿中山高北上主線騎乘約 3.65 km。可用畫面左下角選單或網址 `?map=yuanshan` 切換。
+  重新抓取地圖資料：`/opt/homebrew/bin/python3 tools/fetch_osm.py`
+
 ## 素材
 `assets/` 中的 HDRI 天空、柏油/草地材質、草叢/蕨類/岩石模型來自 [Poly Haven](https://polyhaven.com)（CC0）。
+地圖資料 © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors（ODbL）。
