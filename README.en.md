@@ -1,4 +1,4 @@
-# Hud Iron Virtual Cycling
+# Iron Hud Virtual Cycling
 
 [繁體中文](README.md) | **English**
 
