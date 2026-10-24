@@ -11,7 +11,7 @@
 
 ## 執行
 ```bash
-python3 -m http.server 8000
+python3 tools/serve.py        # 本機伺服器（不快取，改完程式重新整理即生效）
 ```
 用 Chrome 或 Edge 開啟 http://localhost:8000 （Web Bluetooth 需要 localhost 或 https）。
 沒有訓練台時可按「模擬模式」預覽。

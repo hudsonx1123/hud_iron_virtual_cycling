@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ctext y=%22.9em%22 font-size=%2290%22%3E🚴%3C/text%3E%3C/svg%3E">
 <title>Hud Iron Virtual Cycling</title>
 <style>
   :root { --bg: rgba(10,14,22,.7); --fg: #fff; --dim: #aeb9c7; --accent: #3ddc84; }
@@ -127,12 +128,24 @@
 </aside>
 
 <div id="osmCredit" style="display:none;position:fixed;right:1vmin;bottom:0.3vmin;font-size:1.4vmin;color:#fff;opacity:.7;text-shadow:0 0 3px #000">地圖資料 © OpenStreetMap contributors</div>
+<!-- 版本號：修改 js 後遞增，確保瀏覽器不會用到快取的舊模組 -->
 <script type="importmap">
 { "imports": {
   "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-  "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+  "./js/bike.js": "./js/bike.js?v=2026102403",
+  "./js/ble.js": "./js/ble.js?v=2026102403",
+  "./js/body.js": "./js/body.js?v=2026102403",
+  "./js/city.js": "./js/city.js?v=2026102403",
+  "./js/geom.js": "./js/geom.js?v=2026102403",
+  "./js/main.js": "./js/main.js?v=2026102403",
+  "./js/rider.js": "./js/rider.js?v=2026102403",
+  "./js/riderModel.js": "./js/riderModel.js?v=2026102403",
+  "./js/trees.js": "./js/trees.js?v=2026102403",
+  "./js/workout.js": "./js/workout.js?v=2026102403",
+  "./js/world.js": "./js/world.js?v=2026102403"
 } }
 </script>
-<script type="module" src="js/main.js"></script>
+<script type="module" src="./js/main.js?v=2026102403"></script>
 </body>
 </html>

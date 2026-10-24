@@ -68,16 +68,17 @@ function selectWorkout(w) {
   renderList();
 }
 
+// 有選課表時 ERG 一律依課表瓦數（開始前、暫停中都是目前位置的目標）；沒有課表才用手動目標
 function computeTarget() {
   const w = S.workout;
-  if (w && S.running) {
-    const info = targetAt(w, S.t);
-    if (info) return { watts: Math.round(info.frac * S.ftp) + S.offset, info };
-    S.running = false; // 課表結束
+  if (!w) return { watts: S.manual, info: null };
+  const info = targetAt(w, S.t);
+  if (info) return { watts: Math.round(info.frac * S.ftp) + S.offset, info };
+  if (S.running) { // 課表結束：停止計時，維持最後一段結束時的瓦數
+    S.running = false;
     $('btnStart').textContent = '▶ 開始';
-    $('step').textContent = '完成！';
   }
-  return { watts: S.manual, info: null };
+  return { watts: Math.round(w.segs[w.segs.length - 1].b * S.ftp) + S.offset, info: null, done: true };
 }
 
 function sendErg(watts, now) {
@@ -89,7 +90,7 @@ function sendErg(watts, now) {
 }
 
 function adjust(dw) {
-  if (S.workout && S.running) S.offset += dw; else S.manual = Math.max(0, S.manual + dw);
+  if (S.workout) S.offset += dw; else S.manual = Math.max(0, S.manual + dw);
 }
 document.querySelectorAll('[data-adj]').forEach((b) => (b.onclick = () => adjust(+b.dataset.adj)));
 
@@ -135,9 +136,13 @@ function updateHud(info, now) {
   $('elapsed').textContent = fmtHMS(S.t);
   $('clock').textContent = new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false });
   if (info) {
-    $('step').textContent = `${S.target} W · 剩 ${fmt(info.remain)}`;
-    $('stepNext').textContent = info.next ? `下一段 ${Math.round(info.next.a * S.ftp)} W` : '最後一段';
-  } else if (!S.workout) {
+    const state = S.running ? '' : S.t > 0 ? '⏸ ' : '準備 ';
+    $('step').textContent = `${state}${S.target} W · 剩 ${fmt(info.remain)}`;
+    $('stepNext').textContent = info.next ? `下一段 ${Math.round(info.next.a * S.ftp) + S.offset} W` : '最後一段';
+  } else if (S.workout) {
+    $('step').textContent = `完成！ ${S.target} W`;
+    $('stepNext').textContent = '按開始可重新騎一次';
+  } else {
     $('step').textContent = `手動 ERG ${S.manual} W`;
     $('stepNext').textContent = '';
   }
@@ -217,6 +222,8 @@ const panel = $('panel');
 const closePanel = () => panel.classList.remove('open');
 $('btnPanel').onclick = (e) => { e.stopPropagation(); panel.classList.toggle('open'); };
 $('btnPanelClose').onclick = closePanel;
+// 點側邊欄裡的空白處（非按鈕、輸入框、課表項目）也會收起
+panel.addEventListener('click', (e) => { if (!e.target.closest('button, input, select, label, .item, .tabs')) closePanel(); });
 // 點側邊欄外面也會收起（側邊欄打開時會蓋住「課表」按鈕）
 document.addEventListener('pointerdown', (e) => { if (panel.classList.contains('open') && !panel.contains(e.target) && e.target !== $('btnPanel')) closePanel(); });
 $('ftp').value = S.ftp;
@@ -323,6 +330,7 @@ if (params.has('fps')) { // 效能量測：每 2 秒輸出平均 FPS 與繪製�
   requestAnimationFrame(tick);
 }
 if (params.has('route')) world.routeS = +params.get('route');
+if (params.has('wt')) window.__seek = (t) => { S.t = t; }; // 測試用：跳到課表某秒
 if (params.has('crank')) world.crank = (+params.get('crank') * Math.PI) / 180;
 setStatus(bleSupported() ? '尚未連接裝置（可先用「模擬模式」預覽）' : '此瀏覽器不支援 Web Bluetooth，請用 Chrome / Edge');
 requestAnimationFrame(frame);
