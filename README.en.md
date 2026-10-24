@@ -11,7 +11,7 @@ A browser-based smart trainer app (a first take on something like Zwift / Rouvy)
 - ERG mode on by default: trainer resistance follows the workout's target power as soon as a workout is selected, with ±5 / ±10 W fine-tuning
 - Workouts: drop `.erg` / `.mrc` / `.zwo` / `.json` files exported from TrainingPeaks into the `workout/` folder and they load automatically (a leading date such as `2026-10-24_…` sets the workout date; ERG watts are scaled using the FTP in the file). Manual import is also supported. Workouts are grouped into Today, Tomorrow and This week, plus built-in samples
 - Large, readable metrics: power (zone-colored), ERG target, heart rate, cadence, speed, distance, elapsed time, time left in the current interval, and a workout profile chart
-- 3D world (Three.js): a tri bike (Specialized Shiv) and rider whose pedaling follows your cadence; rear, side, front, front-¾ and top camera views
+- 3D world (Three.js): a tri bike and rider whose pedaling follows your cadence; rear, side, front, front-¾ and top camera views
 - Switch scenes or language mid-ride without losing workout progress or the Bluetooth connection
 
 | Front-¾ view | Workout panel |
