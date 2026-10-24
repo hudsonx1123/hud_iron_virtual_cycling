@@ -34,6 +34,10 @@ Shortcuts: `1`–`5` camera views, Space start/pause, Up/Down arrows adjust the 
 
 ![Yuanshan Interchange](docs/screenshots/city.jpg)
 
-## Credits
-The HDRI sky, asphalt/grass textures and grass/fern/rock models in `assets/` come from [Poly Haven](https://polyhaven.com) (CC0).
-Map data © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors (ODbL).
+## License
+- Code: [MIT License](LICENSE)
+- `assets/osm/yuanshan.json`: derived from OpenStreetMap data, © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors, available under the [ODbL 1.0](https://opendatacommons.org/licenses/odbl/1-0/) (not MIT)
+- `assets/hdri/`, `assets/tex/`, `assets/models/`: the HDRI sky, asphalt/grass textures and grass/fern/rock models come from [Poly Haven](https://polyhaven.com) under [CC0](https://creativecommons.org/publicdomain/zero/1.0/) (public domain)
+
+## Disclaimer
+This is a personal, non-commercial project. It is not affiliated with, authorized or endorsed by Zwift, Rouvy, TrainingPeaks, Garmin, Specialized, Zoot or any other company mentioned. All product names and trademarks belong to their respective owners and are used only to describe compatibility or for identification. The 3D bike and clothing are procedurally drawn approximations and use no official artwork or logos.

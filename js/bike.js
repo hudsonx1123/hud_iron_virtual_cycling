@@ -181,12 +181,12 @@ export function buildBike() {
   // 踏板（不隨曲柄旋轉）
   const pedals = [-1, 1].map((s) => mesh(new RoundedBoxGeometry(0.07, 0.014, 0.066, 2, 0.005), rubber));
 
-  // ---------- 下管 SPECIALIZED 字樣 ----------
+  // ---------- 下管字樣（不使用品牌商標） ----------
   const logoTex = canvasTex(1024, 96, (ctx, w, h) => {
     ctx.fillStyle = '#fff';
     ctx.font = 'italic 900 84px "Arial Black", Arial, sans-serif';
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText('SPECIALIZED', w / 2, h / 2 + 4);
+    ctx.fillText('SPECIAL', w / 2, h / 2 + 4);
   });
   const logoMat = new THREE.MeshStandardMaterial({ map: logoTex, transparent: true, roughness: 0.3, polygonOffset: true, polygonOffsetFactor: -2 });
   const dt = new THREE.CatmullRomCurve3(dtPts);

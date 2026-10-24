@@ -34,6 +34,10 @@ python3 tools/serve.py        # 本機伺服器（不快取，改完程式重新
 
 ![圓山交流道](docs/screenshots/city.jpg)
 
-## 素材
-`assets/` 中的 HDRI 天空、柏油/草地材質、草叢/蕨類/岩石模型來自 [Poly Haven](https://polyhaven.com)（CC0）。
-地圖資料 © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors（ODbL）。
+## 授權
+- 程式碼：[MIT License](LICENSE)
+- `assets/osm/yuanshan.json`：由 OpenStreetMap 資料整理而成，© [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors，採 [ODbL 1.0](https://opendatacommons.org/licenses/odbl/1-0/) 授權（不適用 MIT）
+- `assets/hdri/`、`assets/tex/`、`assets/models/`：HDRI 天空、柏油/草地材質、草叢/蕨類/岩石模型來自 [Poly Haven](https://polyhaven.com)，採 [CC0](https://creativecommons.org/publicdomain/zero/1.0/)（公眾領域）
+
+## 免責聲明
+本專案為個人非商業作品，與 Zwift、Rouvy、TrainingPeaks、Garmin、Specialized、Zoot 等公司無任何關聯，亦未獲其授權或背書。文中提及的產品名稱與商標均屬各自所有人，僅用於說明相容性或描述用途。3D 車輛與服裝為程式繪製的近似外觀，未使用任何官方圖檔或商標標誌。
