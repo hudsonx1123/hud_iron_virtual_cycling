@@ -1,26 +1,28 @@
+import { t } from './i18n.js';
+
 // 課表：segs = [{d: 秒, a: 起始 %FTP(0~)，b: 結束 %FTP}]，a≠b 為漸變
 
 const seg = (min, a, b = a) => ({ d: min * 60, a, b });
-const build = (name, segs) => ({ name, segs, total: segs.reduce((s, x) => s + x.d, 0) });
+const build = (name, segs, nameEn) => ({ name, nameEn, segs, total: segs.reduce((s, x) => s + x.d, 0) });
 const repeat = (n, ...parts) => Array.from({ length: n }, () => parts).flat();
 
 export const SAMPLES = [
-  build('輕鬆有氧 40 分', [seg(5, 0.45, 0.62), seg(30, 0.65), seg(5, 0.6, 0.4)]),
+  build('輕鬆有氧 40 分', [seg(5, 0.45, 0.62), seg(30, 0.65), seg(5, 0.6, 0.4)], 'Easy aerobic 40 min'),
   build('甜蜜點 2×15', [
     seg(10, 0.5, 0.75),
     ...repeat(2, seg(15, 0.9), seg(5, 0.55)),
     seg(5, 0.6, 0.4),
-  ]),
+  ], 'Sweet spot 2×15'),
   build('VO2max 5×3', [
     seg(10, 0.5, 0.8),
     ...repeat(5, seg(3, 1.15), seg(3, 0.5)),
     seg(5, 0.6, 0.4),
-  ]),
+  ], 'VO2max 5×3'),
   build('鐵三 FTP 輸出 3×12', [
     seg(10, 0.5, 0.75),
     ...repeat(3, seg(12, 0.95), seg(4, 0.55)),
     seg(5, 0.6, 0.4),
-  ]),
+  ], 'Tri FTP 3×12'),
 ];
 
 export const totalTSS = (w) =>
@@ -42,8 +44,8 @@ export function targetAt(w, t) {
 // ---- 檔案匯入 ----
 function parseZwo(text) {
   const doc = new DOMParser().parseFromString(text, 'text/xml');
-  if (doc.querySelector('parsererror')) throw new Error('ZWO 格式錯誤');
-  const name = doc.querySelector('name')?.textContent?.trim() || 'ZWO 課表';
+  if (doc.querySelector('parsererror')) throw new Error(t('errZwo'));
+  const name = doc.querySelector('name')?.textContent?.trim() || t('zwoName');
   const segs = [];
   const num = (el, k, def) => (el.hasAttribute(k) ? parseFloat(el.getAttribute(k)) : def);
   for (const el of doc.querySelector('workout').children) {
@@ -103,8 +105,8 @@ export function parseWorkoutFile(filename, text, ftp) {
   if (ext === 'zwo') w = parseZwo(text);
   else if (ext === 'mrc' || ext === 'erg') w = parseMrc(filename, text, ftp);
   else if (ext === 'json') w = JSON.parse(text);
-  else throw new Error('不支援的格式：' + ext);
-  if (!w.segs?.length) throw new Error('課表內沒有可用的區段');
+  else throw new Error(t('errExt', { x: ext }));
+  if (!w.segs?.length) throw new Error(t('errEmpty'));
   return { ...build(w.name || filename, w.segs), ftp: w.ftp || null };
 }
 

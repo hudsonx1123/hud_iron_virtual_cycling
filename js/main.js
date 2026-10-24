@@ -1,6 +1,7 @@
 import { Trainer, HRMonitor, bleSupported } from './ble.js';
 import { World } from './world.js';
 import { SAMPLES, parseWorkoutFile, targetAt, totalTSS, dateFromName } from './workout.js';
+import { t, lang, setLang, applyI18n, onLangChange } from './i18n.js';
 
 const $ = (id) => document.getElementById(id);
 const store = (k, v) => { try { localStorage[k] = JSON.stringify(v); } catch {} };
@@ -33,20 +34,22 @@ const trainer = new Trainer({
     if (x.speed != null) S.d.speed = x.speed;
     if (x.hr && !S.hrFromStrap) S.d.hr = x.hr;
   },
-  onStatus: (s) => { $('btnTrainer').classList.toggle('on', trainer.connected); setStatus('訓練台：' + s); },
+  onStatus: (s) => { $('btnTrainer').classList.toggle('on', trainer.connected); setStatus(() => `${t('trainer')}: ${s ?? t('disconnected')}`); },
 });
 const hrm = new HRMonitor({
   onHR: (v) => { S.d.hr = v; S.hrFromStrap = true; },
-  onStatus: (s) => { $('btnHR').classList.toggle('on', hrm.connected); setStatus('心率帶：' + s); },
+  onStatus: (s) => { $('btnHR').classList.toggle('on', hrm.connected); setStatus(() => `${t('hrm')}: ${s ?? t('disconnected')}`); },
 });
 
-function setStatus(s) { $('status').textContent = s; }
+// 狀態列文字以函式保存，切換語言時重算
+let statusFn = () => '';
+function setStatus(fn) { statusFn = typeof fn === 'function' ? fn : () => fn; $('status').textContent = statusFn(); }
 async function connect(dev, label) {
-  if (!bleSupported()) return alert('此瀏覽器不支援 Web Bluetooth，請使用 Chrome 或 Edge（需 https 或 localhost）。');
-  try { await dev.connect(); } catch (e) { if (e.name !== 'NotFoundError') setStatus(label + '連線失敗：' + e.message); }
+  if (!bleSupported()) return alert(t('noBle'));
+  try { await dev.connect(); } catch (e) { if (e.name !== 'NotFoundError') setStatus(() => t('connFail', { d: t(label), e: e.message })); }
 }
-$('btnTrainer').onclick = async () => { await connect(trainer, '訓練台'); S.lastSent = null; S.lastSegIdx = -1; };
-$('btnHR').onclick = () => connect(hrm, '心率帶');
+$('btnTrainer').onclick = async () => { await connect(trainer, 'trainer'); S.lastSent = null; S.lastSegIdx = -1; };
+$('btnHR').onclick = () => connect(hrm, 'hrm');
 $('btnSim').onclick = () => { S.sim = !S.sim; $('btnSim').classList.toggle('on', S.sim); };
 
 // ---------- 課表 / ERG ----------
@@ -65,9 +68,16 @@ const zoneColor = (f) =>
 function selectWorkout(w) {
   S.workout = w; S.t = 0; S.offset = 0; S.running = false; S.dist = 0;
   S.lastSent = null; S.lastSegIdx = -1;
-  $('btnStart').textContent = '▶ 開始';
-  $('wname').textContent = w ? `${w.name} · ${fmt(w.total)}` : '自由騎乘 · ERG';
+  updateLabels();
   renderList();
+}
+
+const wName = (w) => (lang === 'en' && w.nameEn) || w.name;
+// 依狀態而變的按鈕與標題文字
+function updateLabels() {
+  const w = S.workout;
+  $('btnStart').textContent = t(S.running ? 'pause' : S.t > 0 && (!w || targetAt(w, S.t)) ? 'resume' : 'start');
+  $('wname').textContent = w ? `${wName(w)} · ${fmt(w.total)}` : t('freeRide');
 }
 
 // 有選課表時 ERG 一律依課表瓦數（開始前、暫停中都是目前位置的目標）；沒有課表才用手動目標
@@ -78,7 +88,7 @@ function computeTarget() {
   if (info) return { watts: Math.round(info.frac * S.ftp) + S.offset, info };
   if (S.running) { // 課表結束：停止計時，維持最後一段結束時的瓦數
     S.running = false;
-    $('btnStart').textContent = '▶ 開始';
+    updateLabels();
   }
   return { watts: Math.round(w.segs[w.segs.length - 1].b * S.ftp) + S.offset, info: null, done: true };
 }
@@ -95,7 +105,7 @@ document.querySelectorAll('[data-adj]').forEach((b) => (b.onclick = () => adjust
 function toggleRun() {
   if (S.workout && !S.running && targetAt(S.workout, S.t) === null) S.t = 0; // 重新開始
   S.running = !S.running;
-  $('btnStart').textContent = S.running ? '⏸ 暫停' : '▶ 繼續';
+  updateLabels();
 }
 $('btnStart').onclick = toggleRun;
 
@@ -132,16 +142,16 @@ function updateHud(info, now) {
   $('spdV').firstChild.nodeValue = d.speed.toFixed(1);
   $('distV').textContent = S.dist.toFixed(2);
   $('elapsed').textContent = fmtHMS(S.t);
-  $('clock').textContent = new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false });
+  $('clock').textContent = new Date().toLocaleTimeString(lang === 'en' ? 'en-GB' : 'zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false });
   if (info) {
-    const state = S.running ? '' : S.t > 0 ? '⏸ ' : '準備 ';
-    $('step').textContent = `${state}${S.target} W · 剩 ${fmt(info.remain)}`;
-    $('stepNext').textContent = info.next ? `下一段 ${Math.round(info.next.a * S.ftp) + S.offset} W` : '最後一段';
+    const state = S.running ? '' : S.t > 0 ? '⏸ ' : t('ready');
+    $('step').textContent = lang === 'en' ? `${state}${S.target} W · ${fmt(info.remain)} ${t('remain')}` : `${state}${S.target} W · ${t('remain')} ${fmt(info.remain)}`;
+    $('stepNext').textContent = info.next ? t('next', { w: Math.round(info.next.a * S.ftp) + S.offset }) : t('lastSeg');
   } else if (S.workout) {
-    $('step').textContent = `完成！ ${S.target} W`;
-    $('stepNext').textContent = '按開始可重新騎一次';
+    $('step').textContent = t('done', { w: S.target });
+    $('stepNext').textContent = t('again');
   } else {
-    $('step').textContent = `手動 ERG ${S.manual} W`;
+    $('step').textContent = t('manual', { w: S.manual });
     $('stepNext').textContent = '';
   }
   drawChart();
@@ -196,13 +206,13 @@ function renderList() {
   const list = $('list');
   list.textContent = '';
   const items = visibleWorkouts();
-  if (!items.length) list.innerHTML = '<p class="hint">這段時間沒有課表，請在下方匯入，或到「範例」挑一個。</p>';
+  if (!items.length) list.innerHTML = `<p class="hint">${t('noWorkouts')}</p>`;
   for (const { w, e } of items) {
     const div = document.createElement('div');
     div.className = 'item' + (S.workout?.name === w.name ? ' sel' : '');
     const info = document.createElement('div');
-    info.innerHTML = `<b></b><small>${e ? e.date + ' · ' : ''}${Math.round(w.total / 60)} 分 · TSS≈${totalTSS(w)}</small>`;
-    info.firstChild.textContent = w.name;
+    info.innerHTML = `<b></b><small>${e ? e.date + ' · ' : ''}${Math.round(w.total / 60)} ${t('min')} · TSS≈${totalTSS(w)}</small>`;
+    info.firstChild.textContent = wName(w);
     div.append(info);
     div.onclick = () => { selectWorkout(w); closePanel(); };
     if (e) {
@@ -230,7 +240,7 @@ $('impDate').value = dateKey(new Date());
 // 課表檔的 FTP 與 App 不同時，詢問是否改用檔案的 FTP（ERG 檔的瓦特數依此換算）
 function checkFtp(w, file) {
   if (!w.ftp || w.ftp === S.ftp) return;
-  if (confirm(`${file} 的 FTP 是 ${w.ftp}W，App 目前是 ${S.ftp}W。\n要把 FTP 改成 ${w.ftp}W 嗎？\n（不改的話，課表目標功率會依 ${S.ftp}W 等比例調整）`)) {
+  if (confirm(t('ftpAsk', { f: file, a: w.ftp, b: S.ftp }))) {
     S.ftp = w.ftp; store('ftp', S.ftp); $('ftp').value = S.ftp;
   }
 }
@@ -269,7 +279,7 @@ async function scanWorkoutFolder() {
       added++;
     } catch (err) { console.warn('workout file', f, err); }
   }
-  if (added) { store('sched', S.sched); store('folderSeen', seen); renderList(); setStatus(`已從 workout 資料夾載入 ${added} 個課表`); }
+  if (added) { store('sched', S.sched); store('folderSeen', seen); renderList(); setStatus(() => t('folderLoaded', { n: added })); }
 }
 
 // ---------- 視角 / 快捷鍵 ----------
@@ -283,16 +293,21 @@ $('mapSel').value = world.map;
 $('mapSel').onchange = async (e) => {
   const sel = e.target, map = sel.value;
   sel.disabled = true; sel.blur();
-  setStatus('載入場景中…');
+  setStatus(() => t('mapLoading'));
   try {
     await world.setMap(map);
     const u = new URL(location.href); u.searchParams.set('map', map); history.replaceState(null, '', u);
-    setStatus('場景已切換');
-  } catch (err) { console.warn('map', err); setStatus('場景載入失敗：' + err.message); }
+    setStatus(() => t('mapDone'));
+  } catch (err) { console.warn('map', err); setStatus(() => t('mapFail', { e: err.message })); }
   sel.value = world.map; sel.disabled = false;
   $('osmCredit').style.display = world.map === 'yuanshan' ? 'block' : 'none';
 };
 if (world.map === 'yuanshan') $('osmCredit').style.display = 'block';
+// ---------- 語言 ----------
+applyI18n();
+$('btnLang').onclick = () => setLang(lang === 'zh' ? 'en' : 'zh');
+onLangChange(() => { updateLabels(); renderList(); $('status').textContent = statusFn(); updateHud(computeTarget().info); });
+
 const KEYS = ['back', 'side', 'front', 'front34', 'top'];
 addEventListener('keydown', (e) => {
   if (e.key === 'Escape') return closePanel();
@@ -301,6 +316,7 @@ addEventListener('keydown', (e) => {
   else if (e.code === 'Space') { e.preventDefault(); toggleRun(); }
   else if (e.key === 'ArrowUp') adjust(5);
   else if (e.key === 'ArrowDown') adjust(-5);
+  else if (e.key === 'l' || e.key === 'L') $('btnLang').click();
 });
 
 // ---------- 主迴圈 ----------
@@ -341,5 +357,5 @@ if (params.has('fps')) { // 效能量測：每 2 秒輸出平均 FPS 與繪製�
 if (params.has('route')) world.routeS = +params.get('route');
 if (params.has('wt')) window.__seek = (t) => { S.t = t; }; // 測試用：跳到課表某秒
 if (params.has('crank')) world.crank = (+params.get('crank') * Math.PI) / 180;
-setStatus(bleSupported() ? '尚未連接裝置（可先用「模擬模式」預覽）' : '此瀏覽器不支援 Web Bluetooth，請用 Chrome / Edge');
+setStatus(() => t(bleSupported() ? 'idle' : 'noBleShort'));
 requestAnimationFrame(frame);

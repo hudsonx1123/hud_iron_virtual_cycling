@@ -51,7 +51,7 @@ export class Trainer {
         this._indicationResolve(null);
         this._indicationResolve = null;
       }
-      this.onStatus('已斷線');
+      this.onStatus(null); // 已斷線
     });
     const server = await dev.gatt.connect();
     const svc = await server.getPrimaryService(FTMS);
@@ -118,7 +118,7 @@ export class Trainer {
     });
     await this.cp.startNotifications().catch(() => {});
 
-    this.name = dev.name || '訓練台';
+    this.name = dev.name || 'FTMS';
     // 依序完成 Request Control (0x00) 與 Start/Resume (0x07) 握手並等待 Indication 確認
     await this._sendCommand([0x00], 300).catch((e) => console.warn('Request control failed', e));
     await this._sendCommand([0x07], 300).catch(() => {});
@@ -211,7 +211,7 @@ export class HRMonitor {
     });
     dev.addEventListener('gattserverdisconnected', () => {
       this.connected = false;
-      this.onStatus('已斷線');
+      this.onStatus(null); // 已斷線
     });
     const server = await dev.gatt.connect();
     const svc = await server.getPrimaryService(HR_SVC);
@@ -222,6 +222,6 @@ export class HRMonitor {
     });
     await ch.startNotifications();
     this.connected = true;
-    this.onStatus(dev.name || '心率帶');
+    this.onStatus(dev.name || 'HRM');
   }
 }
