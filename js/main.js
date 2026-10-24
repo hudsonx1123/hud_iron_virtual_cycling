@@ -20,6 +20,7 @@ const S = {
   hrFromStrap: false,
   lastSent: null,
   lastSentAt: 0,
+  lastSegIdx: -1,
   tab: 'today',
   sched: load('sched', []),
 };
@@ -44,7 +45,7 @@ async function connect(dev, label) {
   if (!bleSupported()) return alert('此瀏覽器不支援 Web Bluetooth，請使用 Chrome 或 Edge（需 https 或 localhost）。');
   try { await dev.connect(); } catch (e) { if (e.name !== 'NotFoundError') setStatus(label + '連線失敗：' + e.message); }
 }
-$('btnTrainer').onclick = async () => { await connect(trainer, '訓練台'); S.lastSent = null; };
+$('btnTrainer').onclick = async () => { await connect(trainer, '訓練台'); S.lastSent = null; S.lastSegIdx = -1; };
 $('btnHR').onclick = () => connect(hrm, '心率帶');
 $('btnSim').onclick = () => { S.sim = !S.sim; $('btnSim').classList.toggle('on', S.sim); };
 
@@ -63,6 +64,7 @@ const zoneColor = (f) =>
 
 function selectWorkout(w) {
   S.workout = w; S.t = 0; S.offset = 0; S.running = false; S.dist = 0;
+  S.lastSent = null; S.lastSegIdx = -1;
   $('btnStart').textContent = '▶ 開始';
   $('wname').textContent = w ? `${w.name} · ${fmt(w.total)}` : '自由騎乘 · ERG';
   renderList();
@@ -81,12 +83,8 @@ function computeTarget() {
   return { watts: Math.round(w.segs[w.segs.length - 1].b * S.ftp) + S.offset, info: null, done: true };
 }
 
-function sendErg(watts, now) {
-  if (!trainer.connected) return;
-  if (watts !== S.lastSent || now - S.lastSentAt > 5000) {
-    trainer.setTargetPower(watts);
-    S.lastSent = watts; S.lastSentAt = now;
-  }
+function sendErg(watts) {
+  trainer.setTargetPower(watts);
 }
 
 function adjust(dw) {
@@ -302,7 +300,7 @@ function frame(now) {
 
   const { watts, info } = computeTarget();
   S.target = Math.max(0, watts);
-  sendErg(S.target, now);
+  sendErg(S.target, info, now);
   if (S.sim && !trainer.connected) simulate(dt, S.target);
   if (!trainer.connected && !S.sim) { S.d.power = 0; S.d.cadence = 0; S.d.speed = 0; }
 
