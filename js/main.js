@@ -280,7 +280,18 @@ function setView(v, instant) {
 }
 document.querySelectorAll('[data-view]').forEach((b) => (b.onclick = () => setView(b.dataset.view)));
 $('mapSel').value = world.map;
-$('mapSel').onchange = (e) => { const u = new URL(location.href); u.searchParams.set('map', e.target.value); location.href = u; };
+$('mapSel').onchange = async (e) => {
+  const sel = e.target, map = sel.value;
+  sel.disabled = true; sel.blur();
+  setStatus('載入場景中…');
+  try {
+    await world.setMap(map);
+    const u = new URL(location.href); u.searchParams.set('map', map); history.replaceState(null, '', u);
+    setStatus('場景已切換');
+  } catch (err) { console.warn('map', err); setStatus('場景載入失敗：' + err.message); }
+  sel.value = world.map; sel.disabled = false;
+  $('osmCredit').style.display = world.map === 'yuanshan' ? 'block' : 'none';
+};
 if (world.map === 'yuanshan') $('osmCredit').style.display = 'block';
 const KEYS = ['back', 'side', 'front', 'front34', 'top'];
 addEventListener('keydown', (e) => {

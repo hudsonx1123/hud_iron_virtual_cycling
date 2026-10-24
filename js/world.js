@@ -286,6 +286,10 @@ export class World {
     this.rockVars = variants(rockG, 0, 1e9, true);
     for (const v of [...this.grassVars, ...this.fernVars]) { v.mat.transparent = false; v.mat.alphaTest = 0.5; v.mat.side = THREE.DoubleSide; }
 
+    await this.buildMap();
+  }
+
+  async buildMap() {
     if (this.map === 'yuanshan') {
       // 真實地點：圓山交流道（OpenStreetMap）
       this.scene.fog.density = 0.00045;
@@ -296,7 +300,39 @@ export class World {
       this.scene.traverse((o) => { for (const m of [].concat(o.material || [])) if ('envMapIntensity' in m && m.envMapIntensity === 1) m.envMapIntensity = 0.7; });
       return;
     }
+    this.scene.fog.density = 0.0012;
+    this.mountains.scale.set(1, 1, 1);
+    this.mountains.material.fog = true;
+    this.mountains.material.needsUpdate = true;
+    this.farGround.visible = true;
+    this.rig.position.set(LANE_X, 0, 0);
+    this.rig.rotation.set(0, 0, 0);
     for (let i = 0; i < NCH; i++) this.chunks.push(this.buildChunk((i - 1) * CH + Math.floor(this.rig.position.z / CH) * CH));
+  }
+
+  // 不重新載入頁面切換場景（課表進度與藍牙連線不受影響）
+  async setMap(name) {
+    await this.ready;
+    if (name === this.map) return;
+    // 共用素材（樹、植被、護欄等）留著給下一個場景用，只釋放場景自己的幾何與材質
+    const keep = new Set([this.roadMat, this.groundMat, this.lineMat, this.barrierGeo, this.barrierMat, this.signGeo, ...[].concat(this.signMats),
+      ...this.treeKinds.flatMap((k) => [k.wood, k.bark, k.leaves, k.leafMat]),
+      ...[...this.grassVars, ...this.fernVars, ...this.rockVars].flatMap((v) => [v.geo, v.mat])]);
+    const drop = (group) => {
+      this.scene.remove(group);
+      group.traverse((o) => {
+        if (o.isInstancedMesh) o.dispose();
+        if (o.geometry && !keep.has(o.geometry)) o.geometry.dispose();
+        for (const m of [].concat(o.material || [])) if (!keep.has(m)) m.dispose();
+      });
+    };
+    for (const c of this.chunks) drop(c.group);
+    this.chunks = [];
+    if (this.city) drop(this.city.group);
+    this.city = null;
+    this.map = name;
+    this.ready = this.buildMap();
+    await this.ready;
   }
 
   // HDRI：背景 + 環境光；找出最亮像素作為太陽方向，並取地平線平均色作為霧色
