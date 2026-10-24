@@ -2,6 +2,7 @@
 
 const DICT = {
   zh: {
+    title: '哈鐵 · Hud Iron',
     clock: '現在時間', elapsed: '騎乘時間', dist: '距離 KM',
     power: '功率 POWER', ergTarget: 'ERG 目標', hr: '心率 HEART RATE', cad: '踏頻 CADENCE', spd: '速度 SPEED',
     start: '▶ 開始', pause: '⏸ 暫停', resume: '▶ 繼續',
@@ -28,6 +29,7 @@ const DICT = {
     errZwo: 'ZWO 格式錯誤', zwoName: 'ZWO 課表', errExt: '不支援的格式：{x}', errEmpty: '課表內沒有可用的區段',
   },
   en: {
+    title: 'Hud Iron',
     clock: 'TIME', elapsed: 'ELAPSED', dist: 'DISTANCE KM',
     power: 'POWER', ergTarget: 'ERG target', hr: 'HEART RATE', cad: 'CADENCE', spd: 'SPEED',
     start: '▶ Start', pause: '⏸ Pause', resume: '▶ Resume',
@@ -66,6 +68,7 @@ export const onLangChange = (fn) => listeners.push(fn);
 
 export function applyI18n(root = document) {
   document.documentElement.lang = lang === 'zh' ? 'zh-Hant' : 'en';
+  document.title = t('title');
   root.querySelectorAll('[data-i18n]').forEach((el) => (el.textContent = t(el.dataset.i18n)));
   root.querySelectorAll('[data-i18n-html]').forEach((el) => (el.innerHTML = t(el.dataset.i18nHtml)));
   root.querySelectorAll('[data-i18n-title]').forEach((el) => (el.title = t(el.dataset.i18nTitle)));

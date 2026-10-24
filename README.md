@@ -1,8 +1,8 @@
-# Iron Hud Virtual Cycling
+# Hud Iron 哈鐵
 
 **繁體中文** | [English](README.en.md)
 
-瀏覽器版的智慧訓練台騎乘軟體（類似 Zwift / Rouvy 的第一版）。介面可即時切換中文 / English。
+「哈鐵」就是很「哈」鐵人三項。瀏覽器版的智慧訓練台騎乘軟體（類似 Zwift / Rouvy 的第一版）。介面可即時切換中文 / English。
 
 ![騎乘畫面](docs/screenshots/hud-zh.jpg)
 

@@ -1,6 +1,8 @@
-# Iron Hud Virtual Cycling
+# Hud Iron 哈鐵
 
 [繁體中文](README.md) | **English**
+
+*"Hud Iron" sounds like 哈鐵 (crazy about triathlon) in Taiwanese Mandarin.*
 
 A browser-based smart trainer app (a first take on something like Zwift / Rouvy). The interface switches between Chinese and English on the fly.
 
