@@ -12,6 +12,7 @@ A browser-based smart trainer app (a first take on something like Zwift / Rouvy)
 - Ride imported GPX routes: trainer resistance follows the gradient (FTMS SIM mode), speed is computed from power and gradient, and the HUD shows gradient, distance left, climbing and an elevation profile
 - Preview fast-forward (button or P key, 1× / 4× / 16×); click the elevation profile to jump anywhere on the route
 - Built-in real-terrain route, the Zhongshe Rd climb: MOI DTM terrain, NLSC orthophotos, OpenStreetMap buildings / roads / streams, and the Waishuangxi Bridge at the start
+- Built-in real-terrain route, the Fengguizui climb: Fenglin Bridge up to the Fengguizui saddle (6.3 km, ~420 m of climbing), finishing at the Fengguizui pavilion, past the 佛 inscription rock face
 - Landmarks along the way: Cuishan Police Station, Shuangxi Elementary School and bus stops; at the finish, the bus turnaround with its yellow cross-hatch, portable toilets and the Cuishan Trail stone marker. The HUD names each one as you approach
 - `tools/make_route_gpx.py`: build a GPX file and real-scene data from OpenStreetMap road names
 
