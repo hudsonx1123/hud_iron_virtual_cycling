@@ -183,7 +183,7 @@ function updateHud(info, now) {
     $('step').textContent = done ? t('routeDone', { n: wName(R) }) : `${here.grade.toFixed(1)}% · ${t('remainKm', { d: ((R.total - S.routeD) / 1000).toFixed(2) })}`;
     const mark = R.marks?.find((m) => m.s - S.routeD < 150 && m.s - S.routeD > -30); // 前方 150m 內的地標
     const info = t('climbInfo', { a: Math.round(here.climbed), b: Math.round(R.gain), e: Math.round(here.ele) });
-    $('stepNext').textContent = done ? t('routeAgain') : mark ? `📍 ${mark.kind === 'turning' ? t('finishAt') : ''}${mark.label} · ${info}` : info;
+    $('stepNext').textContent = done ? t('routeAgain') : mark ? `📍 ${['turning', 'shelter'].includes(mark.kind) ? t('finishAt') : ''}${mark.label} · ${info}` : info;
   } else {
     $('step').textContent = t('manual', { w: S.manual });
     $('stepNext').textContent = '';

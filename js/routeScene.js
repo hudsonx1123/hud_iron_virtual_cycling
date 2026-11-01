@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { V, fbm, noise2, rng } from './geom.js';
-import { buildRealObjects, aerialMaterial, buildingBlocker, landmarkMarks, turningArea } from './realScene.js';
+import { buildRealObjects, aerialMaterial, buildingBlocker, keepClear, landmarkMarks, turningArea } from './realScene.js';
 
 // GPX 路線場景：沿路線鋪路面，路旁地形以「路面高度 + 山坡」生成（一側上坡、一側下坡，隨路段變化），
 // 再沿路分段種樹、草叢與護欄。座標同 route.js：x 向東、z 向南、y 為相對起點高度。
@@ -55,9 +55,17 @@ export function buildRouteScene(world, r, real = null) {
 
   // 終點公車迴轉場：地形整平
   const turning = real && turningArea(r, real.scene, hw);
+  const clear = real && keepClear(r, real.scene, turning); // 迴轉場、涼亭周圍不種樹
   if (turning) {
     const dem0 = real.demY;
     real = { ...real, demY: (x, z) => { const d = turning.dist(x, z), k = smooth(1 - d / 10); return k > 0 ? dem0(x, z) + (turning.y - 0.15 - dem0(x, z)) * k : dem0(x, z); } };
+  } else if (real) {
+    // 沒有迴轉場的終點（路口、埡口）：周圍地形順到路面高度，路的盡頭不會被 DTM 蓋住或破洞
+    const dem0 = real.demY, ex = r.x[n - 1], ez = r.z[n - 1];
+    real = { ...real, demY: (x, z) => {
+      const k = smooth(1 - (Math.hypot(x - ex, z - ez) - 15) / 25), h = dem0(x, z);
+      return k > 0 ? h + (r.y[nearest(x, z).i] - 0.15 - h) * k : h;
+    } };
   }
 
   // 地形高度 = 路面高度 + 山坡（o 為帶號側向距離，i 為路段樣本）+ 起伏
@@ -68,12 +76,14 @@ export function buildRouteScene(world, r, real = null) {
   };
   const rough = (x, z, a) => (fbm(x * 0.005, z * 0.005, 4, 5) - 0.45) * Math.min(a, 400) * 0.35 * smooth(a / 30);
   const lift = (o, i, x, z) => slopeLift(o, i) + rough(x, z, Math.max(0, Math.abs(o) - 4));
+  let offsArr = null; // 各樣本的截面（下方計算）；路廊被別段路截短時，地形要在較短的距離內接到真實地形
   const corridorH = (o, i, x, z) => {
     const a = Math.abs(o), e = hw[i] + 0.4;
     if (real && onBridge[i] && a < e + 6) return Math.min(real.demY(x, z), r.y[i] - 1.3); // 橋下露出溪谷
     if (a <= e) return r.y[i] - 0.12;
     const far = real ? real.demY(x, z) : terrainH(x, z, { d: a, i, o });
-    return r.y[i] + (far - r.y[i]) * smooth((a - e) / (BLEND - e)); // 路肩往外接到地形
+    const lim = offsArr ? Math.max(e + 1, Math.min(BLEND, o >= 0 ? offsArr[i].at(-1) : -offsArr[i][0])) : BLEND;
+    return r.y[i] + (far - r.y[i]) * smooth((a - e) / (lim - e)); // 路肩往外接到地形（髮夾彎兩條腿在交界處都等於真實地形，不會一高一低懸空）
   };
 
   // ---------- 最近路段查詢（空間雜湊） ----------
@@ -158,7 +168,7 @@ export function buildRouteScene(world, r, real = null) {
   const sideOffs = (e, M) => {
     const out = [];
     for (const v of [e + 0.4, e + 1, Math.max(6, e + 2), Math.max(8.5, e + 4), 12, 16, 20, 24, CORR])
-      out.push(Math.max(Math.min(v, M), (out.at(-1) ?? 0) + 0.25));
+      out.push(Math.max(Math.min(v, M), (out.at(-1) ?? 0) + 0.02)); // 截短時全部擠在 M 以內（間距很小也沒關係），不越過別段路的中線
     return out;
   };
   const kc = Math.max(2, Math.round(10 / r.step));
@@ -169,9 +179,15 @@ export function buildRouteScene(world, r, real = null) {
     const M = curv > 1e-4 ? Math.max(e + 3, Math.min(CORR, 0.85 / curv)) : CORR;
     // 往外探測：附近有路線的其他路段（上下平行的山路）時，兩段路的地形帶在中間分界，不互相覆蓋
     const reach = (sd) => {
-      for (const o of [8, 12, 16, 20, 24, CORR]) {
-        const q = nearest(r.x[i] + tz[i] * o * sd, r.z[i] - tx[i] * o * sd);
-        if (Math.abs(r.s[q.i] - r.s[i]) > 40 && q.d < CORR) return Math.max(e + 3, (o + q.d) / 2); // 兩段路各佔一半的距離
+      // 探測點離別段路比離自己的路中心還近，就是越過了兩段路的中線（上下平行的山路、髮夾彎的兩條腿）；
+      // 用二分法求出中線位置，兩段路的地形帶在同一條線上交會，高度一致
+      const other = (o) => { const q = nearest(r.x[i] + tz[i] * o * sd, r.z[i] - tx[i] * o * sd); return Math.abs(r.s[q.i] - r.s[i]) > 12 && q.d < o; };
+      let lo = 0;
+      for (const o of [4, 6, 8, 10, 12, 16, 20, 24, CORR]) {
+        if (!other(o)) { lo = o; continue; }
+        let hi = o;
+        for (let k = 0; k < 6; k++) { const m = (lo + hi) / 2; if (other(m)) hi = m; else lo = m; }
+        return Math.max(e + 1, lo);
       }
       return CORR;
     };
@@ -179,7 +195,7 @@ export function buildRouteScene(world, r, real = null) {
     return [...Rt.reverse().map((v) => -v), 0, ...L];
   };
   const no = 19 + 2; // 兩側外緣各加一圈往下的裙邊，蓋住與遠景地形的接縫
-  const offsArr = Array.from({ length: n }, (_, i) => offsAt(i)); // 各樣本的截面（兩端即路廊實際範圍）
+  offsArr = Array.from({ length: n }, (_, i) => offsAt(i)); // 各樣本的截面（兩端即路廊實際範圍）
 
   // ---------- 遠景地形（規則網格；靠近道路的三角形挖掉，由路廊網格覆蓋） ----------
   let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
@@ -211,7 +227,7 @@ export function buildRouteScene(world, r, real = null) {
     for (const [x, z] of [a, b, c, [(a[0] + b[0] + c[0]) / 3, (a[1] + b[1] + c[1]) / 3],
       [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], [(b[0] + c[0]) / 2, (b[1] + c[1]) / 2], [(a[0] + c[0]) / 2, (a[1] + c[1]) / 2]]) {
       const q = nearest(x, z), along = (x - r.x[q.i]) * tx[q.i] + (z - r.z[q.i]) * tz[q.i];
-      if ((q.i === 0 && along < -0.5) || (q.i === n - 1 && along > 0.5)) continue; // 起點之前、終點之後沒有路廊，不挖
+      if ((q.i === 0 && along < -0.5) || (q.i === n - 1 && along > 0.5)) return false; // 跨到起點之前、終點之後（沒有路廊）的三角形保留，免得路的盡頭破洞
       if (q.d < hw[q.i] + 3) return true;
     }
     return false;
@@ -254,9 +270,11 @@ export function buildRouteScene(world, r, real = null) {
     const nx = tz[i], nz = -tx[i], offs = offsArr[i];
     for (let j = 0; j < no; j++) {
       // 外緣裙邊往外稍微下斜，藏在遠景地形之下、蓋住接縫
-      const skirt = j === 0 || j === no - 1, o = skirt ? (j === 0 ? offs[0] - 2 : offs.at(-1) + 2) : offs[j - 1];
+      // 被別段路或彎道截短的一側（髮夾彎內側）：裙邊直接垂直往下，不伸進另一段路的範圍、露出懸空的凸緣
+      const skirt = j === 0 || j === no - 1, edge = j === 0 ? offs[0] : offs.at(-1), clipped = Math.abs(edge) < CORR - 0.01;
+      const out = clipped ? 0 : 2, o = skirt ? edge + Math.sign(edge) * out : offs[j - 1];
       const x = r.x[i] + nx * o, z = r.z[i] + nz * o;
-      const y = skirt ? corridorH(o - Math.sign(o) * 2, i, x - nx * Math.sign(o) * 2, z - nz * Math.sign(o) * 2) - 1.2 : corridorH(o, i, x, z), v = i * no + j;
+      const y = skirt ? corridorH(edge, i, r.x[i] + nx * edge, r.z[i] + nz * edge) - (clipped ? 3 : 1.2) : corridorH(o, i, x, z), v = i * no + j;
       cpos.set([x, y, z], v * 3); cuv.set(aerial ? aerial.uv(x, z) : [x / 5, z / 5], v * 2);
       cdirt[v] = smooth((hw[i] + 2.6 - Math.abs(o)) / 1.6);
     }
@@ -304,6 +322,8 @@ export function buildRouteScene(world, r, real = null) {
   const sc = V(), p = V(), up = V(0, 1, 0), xAx = V(1, 0, 0);
   const blocks = [];
   const nb = Math.ceil(r.total / BLOCK);
+  // 實景：路旁視野開闊、不種樹的路段（scene.route.open = [[s0, s1, 'L' | 'R']]，o > 0 為騎士左側）
+  const openSide = (s, o) => !!RW?.open?.some(([s0, s1, sd]) => s >= s0 && s <= s1 && (sd === 'L' ? o > 0 : o < 0));
   for (let b = 0; b < nb; b++) {
     const rand = rng(b * 7919 + 101), blk = { s0: b * BLOCK, s1: (b + 1) * BLOCK, near: [], all: [] };
     const len = Math.min(BLOCK, r.total - b * BLOCK);
@@ -328,9 +348,11 @@ export function buildRouteScene(world, r, real = null) {
     // 樹
     const trees = world.treeKinds.map(() => []);
     const plant = (kind, s, o, scl, extra) => {
+      if (kind < 4 && openSide(s, o)) return; // 視野開闊的路段：只留矮灌木
       const { x, z } = at(s, o), q = nearest(x, z);
       if (q.d < hw[q.i] + extra || onBridge[q.i] && q.d < hw[q.i] + 8) return; // 彎道內側可能落到另一段路上；橋旁不種
-      if (turning?.inside(x, z, 3)) return;
+      if (clear?.(x, z, 3)) return;
+      if (kind < 4 && openSide(r.s[q.i], q.o)) return; // 依實際位置再判斷一次：髮夾彎時別段路的樹可能落到開闊的這一側
       if (blocked?.(x, z, Math.abs(o) < 12 ? 12 : 2)) return; // 實景：避開房屋；路旁有房子的地方不種行道樹
       if (aerial && Math.abs(o) > 12 && !aerial.veg(x, z)) return; // 實景：路旁以外，航照上不是植被就不種
       trees[kind].push([x, groundAt(x, z) - 0.2, z, rand() * Math.PI * 2, scl]);
@@ -360,7 +382,7 @@ export function buildRouteScene(world, r, real = null) {
       for (let t = 0; t < count; t++) {
         const s = b * BLOCK + rand() * len, sd = rand() < 0.5 ? -1 : 1, { x, z } = at(s, sd * (he(s) + oMin + rand() ** pw * spread));
         const q = nearest(x, z);
-        if (q.d < hw[q.i] + 0.5 || onBridge[q.i] || turning?.inside(x, z, 1) || blocked?.(x, z, 0.5)) continue;
+        if (q.d < hw[q.i] + 0.5 || onBridge[q.i] || clear?.(x, z, 1) || blocked?.(x, z, 0.5)) continue;
         list.push([x, groundAt(x, z) - 0.03, z, rand() * Math.PI * 2, sMin + rand() * (sMax - sMin)]);
       }
       const m = make(vr.geo, vr.mat, list, cast);
@@ -373,7 +395,7 @@ export function buildRouteScene(world, r, real = null) {
     const rails = [];
     for (let s = b * BLOCK + 1.2; s < b * BLOCK + len; s += 2.45) {
       const i = Math.min(n - 1, Math.round(s / r.step));
-      if (onBridge[i] || turning?.inside(r.x[i], r.z[i], 2)) continue; // 橋上有護牆
+      if (onBridge[i] || clear?.(r.x[i], r.z[i], 2)) continue; // 橋上有護牆
       for (const sd of [-1, 1]) {
         if (real) {
           const { x, z } = at(s, sd * 9);

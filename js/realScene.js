@@ -187,11 +187,12 @@ export function landmarkMarks(r, scene, nearest) {
   const marks = [];
   for (const [s0, s1, name] of scene.route?.bridges ?? []) if (name) marks.push({ s: (s0 + s1) / 2, label: name, kind: 'bridge' });
   for (const l of scene.landmarks ?? []) {
-    if (!['police', 'school', 'turning'].includes(l.t)) continue;
+    if (!['police', 'school', 'turning', 'shelter', 'inscription'].includes(l.t)) continue;
     const P = ring(l.p, r);
     const q = P.map(([x, z]) => nearest(x, z)).reduce((a, b) => (b.d < a.d ? b : a));
     const trail = l.t === 'turning' && scene.landmarks.find((x) => x.t === 'trail');
-    marks.push({ s: r.s[q.i], label: trail ? `${l.name}・${trail.name}` : l.name, kind: l.t });
+    const label = trail ? `${l.name}・${trail.name}` : l.t === 'inscription' ? `「${l.name}」字岩壁` : l.name;
+    marks.push({ s: r.s[q.i], label, kind: l.t });
   }
   return marks.sort((a, b) => a.s - b.s);
 }
@@ -228,6 +229,20 @@ export function turningArea(r, scene, hw) {
   const near = (p, x, z, rad) => p && Math.hypot(x - p.x, z - p.z) < rad;
   const inside = (x, z, buf = 0) => dist(x, z) < buf || near(stone, x, z, 1.8 + buf) || (toilets ?? []).some((p) => near(p, x, z, 1.2 + buf));
   return { cx, cz, ex, ez, L, W, y, name: l.name, dist, inside, stone, toilets };
+}
+
+// 不種樹、不長草的範圍：終點迴轉場、涼亭與題字岩壁周圍，以及它們到路線之間（涼亭看終點、岩壁看最近的路段），騎過時看得到
+export function keepClear(r, scene, turning) {
+  const n = r.s.length;
+  const zones = (scene.landmarks ?? []).filter((l) => l.t === 'shelter' || l.t === 'inscription').map((l) => {
+    const P = ring(l.p, r), c = [P.reduce((a, p) => a + p[0], 0) / P.length, P.reduce((a, p) => a + p[1], 0) / P.length];
+    let k = n - 1;
+    if (l.t === 'inscription') for (let i = 0; i < n; i++) if (Math.hypot(r.x[i] - c[0], r.z[i] - c[1]) < Math.hypot(r.x[k] - c[0], r.z[k] - c[1])) k = i;
+    return { P, c, to: [r.x[k], r.z[k]], pad: l.t === 'inscription' ? 5 : 2.5 };
+  });
+  if (!turning && !zones.length) return null;
+  return (x, z, buf = 0) => !!turning?.inside(x, z, buf) || zones.some(({ P, c, to, pad }) =>
+    (P.length > 2 && inPoly(P, x, z)) || P.some((a, i) => segD(x, z, a, P[(i + 1) % P.length]) < pad + buf) || segD(x, z, c, to) < 10 + buf);
 }
 
 // 沿路線掃出截面（橋面、護牆），sec = [[側向 o, 高度差], ...]
@@ -320,7 +335,7 @@ export function buildRealObjects(world, ctx) {
     const P = ring(b.p, r);
     if (P.length < 3 || P.some(([x, z]) => nearRoad(x, z, 1))) continue;
     const cx = P.reduce((a, p) => a + p[0], 0) / P.length, cz = P.reduce((a, p) => a + p[1], 0) / P.length;
-    const pol = police.find((l) => inPoly(l.P, cx, cz) || Math.hypot(l.P[0][0] - P[0][0], l.P[0][1] - P[0][1]) < 1);
+    const pol = police.find((l) => inPoly(l.P, cx, cz) || inPoly(P, ...l.P[0]) || Math.hypot(l.P[0][0] - P[0][0], l.P[0][1] - P[0][1]) < 1); // OSM 派出所可能是外框或單點
     const style = pol ? 'police' : schools.some((l) => inPoly(l.P, cx, cz)) ? 'school' : 'house';
     const B = buckets[style];
     const gs = P.map(([x, z]) => ground(x, z));
@@ -357,9 +372,12 @@ export function buildRealObjects(world, ctx) {
 
   for (const s of schools) buildSchool(group, s, marks, ctx);
   if (turning) buildTurning(group, turning, world);
+  else buildJunction(group, ctx, world);
   if (turning?.stone) buildTrailStone(group, turning, ctx);
   if (turning?.toilets) buildToilets(group, turning, ctx);
   for (const l of marks.filter((x) => x.t === 'bus')) busStop(group, l, ctx);
+  for (const l of marks.filter((x) => x.t === 'shelter')) buildShelter(group, l, ctx);
+  for (const l of marks.filter((x) => x.t === 'inscription')) buildInscription(group, l, ctx);
   return group;
 }
 
@@ -493,6 +511,18 @@ function buildTurning(group, T, world) {
   group.add(pad, grid, wall);
 }
 
+// 沒有迴轉場的終點（路口）：路的盡頭鋪一塊柏油，接上 OSM 的岔路
+function buildJunction(group, ctx, world) {
+  const { r, hw, n } = ctx, R = hw[n - 1] + 3;
+  const asphalt = world.roadMat.clone();
+  asphalt.map = asphalt.map.clone(); asphalt.map.repeat.set((R * 2) / 3.5, (R * 2) / 3.5); asphalt.map.needsUpdate = true;
+  Object.assign(asphalt, { polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
+  const pad = new THREE.Mesh(new THREE.CircleGeometry(R, 32).rotateX(-Math.PI / 2), asphalt);
+  pad.position.set(r.x[n - 1] + r.tx[n - 1] * (R - 1), r.y[n - 1] + 0.01, r.z[n - 1] + r.tz[n - 1] * (R - 1)); // 從路的盡頭往前鋪，不蓋到路面標線
+  pad.receiveShadow = true;
+  group.add(pad);
+}
+
 // 步道入口石碑：花崗岩碑身刻紅字，下有水泥基座，面向迴轉場
 function buildTrailStone(group, T, ctx) {
   const ground = ctx.surface ?? ctx.ground, { x, z, name } = T.stone;
@@ -575,4 +605,150 @@ function busStop(group, l, ctx) {
     if (nm.length > 7) c.fillText(nm.slice(7, 14), W / 2, H * 0.68);
   });
   group.add(pole, board(tex, 0.45, 0.6, x, y + 2.35, z, -r.tx[i], -r.tz[i]));
+}
+
+// 涼亭：石砌平台、木紋柱與坐椅、四面翹角的瓦頂，面向道路那側掛匾額（OSM 只有外框，外觀為一般山區涼亭的樣式）
+function buildShelter(group, l, ctx) {
+  const { r, nearest } = ctx, ground = ctx.surface ?? ctx.ground, P = ring(l.p, r);
+  if (P.length < 3) return;
+  // 外框的最小外接矩形（取最長邊的方向）
+  let ax = 1, az = 0, best = 0;
+  P.forEach((a, i) => { const b = P[(i + 1) % P.length], L = Math.hypot(b[0] - a[0], b[1] - a[1]); if (L > best) { best = L; ax = (b[0] - a[0]) / L; az = (b[1] - a[1]) / L; } });
+  const bx = -az, bz = ax, us = P.map(([x, z]) => x * ax + z * az), vs = P.map(([x, z]) => x * bx + z * bz);
+  const u0 = Math.min(...us), u1 = Math.max(...us), v0 = Math.min(...vs), v1 = Math.max(...vs);
+  const hu = Math.max(1.8, (u1 - u0) / 2), hv = Math.max(1.8, (v1 - v0) / 2), cu = (u0 + u1) / 2, cv = (v0 + v1) / 2;
+  const cx = cu * ax + cv * bx, cz = cu * az + cv * bz;
+  const W = (a, b) => [cx + ax * a + bx * b, cz + az * a + bz * b]; // 區域座標 → 世界
+  const gs = [[-1, -1], [1, -1], [1, 1], [-1, 1], [0, 0]].map(([a, b]) => ground(...W(a * (hu + 0.6), b * (hv + 0.6))));
+  const top = (Math.max(...gs) + Math.min(...gs)) / 2 + 0.35, bottom = Math.min(...gs) - 4; // 斜坡上：上坡側埋進地面、下坡側露出石砌
+  const g = new THREE.Group();
+  g.position.set(cx, 0, cz); g.rotation.y = Math.atan2(-az, ax); // 區域 x = 長邊 (ax, az)、區域 z = (bx, bz)
+  const add = (geo, mat, x, y, z) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.castShadow = m.receiveShadow = true; g.add(m); return m; };
+
+  // 平台：石塊砌面，頂面鋪石板
+  const stoneTex = signTex(256, 128, (c, w, h) => {
+    c.fillStyle = '#8d877c'; c.fillRect(0, 0, w, h);
+    for (let row = 0; row < 4; row++) for (let k = -1; k < 5; k++) {
+      const x = k * 64 + (row % 2) * 32, v = 120 + ((row * 7 + k * 13) % 5) * 9;
+      c.fillStyle = `rgb(${v},${v - 4},${v - 12})`; c.fillRect(x + 2, row * 32 + 2, 60, 28);
+    }
+  });
+  stoneTex.wrapS = stoneTex.wrapT = THREE.RepeatWrapping; stoneTex.repeat.set(3, (top - bottom) / 1.2);
+  const stone = new THREE.MeshStandardMaterial({ map: stoneTex, roughness: 0.95 });
+  const slab = new THREE.MeshStandardMaterial({ color: 0xa8a39a, roughness: 0.85 });
+  add(new THREE.BoxGeometry(hu * 2 + 1.2, top - bottom, hv * 2 + 1.2), [stone, stone, slab, stone, stone, stone], 0, (top + bottom) / 2, 0);
+
+  // 柱子（長邊超過 5m 時中間再加一根）與柱頂橫樑
+  const wood = new THREE.MeshStandardMaterial({ color: 0x6b3f26, roughness: 0.7 });
+  const beam = new THREE.MeshStandardMaterial({ color: 0x8c2f22, roughness: 0.6 });
+  const H = 2.9, cols = hu * 2 > 5 ? [-1, 0, 1] : [-1, 1];
+  for (const a of cols) for (const b of [-1, 1]) add(new THREE.CylinderGeometry(0.13, 0.15, H, 12), wood, a * hu, top + H / 2, b * hv);
+  for (const b of [-1, 1]) add(new THREE.BoxGeometry(hu * 2 + 0.3, 0.32, 0.22), beam, 0, top + H - 0.16, b * hv);
+  for (const a of [-1, 1]) add(new THREE.BoxGeometry(0.22, 0.32, hv * 2 + 0.3), beam, a * hu, top + H - 0.16, 0);
+  // 坐椅：兩長邊與一短邊，靠道路的短邊留空當入口
+  const q = nearest(cx, cz), toRoad = Math.sign((r.x[q.i] - cx) * ax + (r.z[q.i] - cz) * az) || 1;
+  for (const b of [-1, 1]) add(new THREE.BoxGeometry(hu * 2 - 0.3, 0.08, 0.42), wood, 0, top + 0.45, b * (hv - 0.25));
+  add(new THREE.BoxGeometry(0.42, 0.08, hv * 2 - 0.9), wood, -toRoad * (hu - 0.25), top + 0.45, 0);
+  for (const a of [-0.6, 0.6]) for (const b of [-1, 1]) add(new THREE.BoxGeometry(0.1, 0.45, 0.36), wood, a * hu, top + 0.22, b * (hv - 0.25));
+
+  // 屋頂：四坡內凹、四角起翹；上面瓦片、底面木色
+  const ov = 0.9, A = hu + ov, B = hv + ov, rl = Math.max(0.3, hu - hv * 0.8), eave = top + H + 0.05, ridge = eave + Math.min(2.2, hv * 0.9);
+  const faces = [ // [屋簷起點, 屋簷終點, 屋脊起點, 屋脊終點]
+    [[-A, -B], [A, -B], [-rl, 0], [rl, 0]], [[A, B], [-A, B], [rl, 0], [-rl, 0]],
+    [[-A, B], [-A, -B], [-rl, 0], [-rl, 0]], [[A, -B], [A, B], [rl, 0], [rl, 0]],
+  ];
+  const tilePos = [], tileUv = [], tileIdx = [], N = 10;
+  for (const [e0, e1, r0, r1] of faces) {
+    const base = tilePos.length / 3, eLen = Math.hypot(e1[0] - e0[0], e1[1] - e0[1]);
+    for (let j = 0; j <= N; j++) for (let k = 0; k <= N; k++) {
+      const u = k / N, v = j / N, ex = e0[0] + (e1[0] - e0[0]) * u, ez = e0[1] + (e1[1] - e0[1]) * u;
+      const rx = r0[0] + (r1[0] - r0[0]) * u, rz = r0[1] + (r1[1] - r0[1]) * u;
+      const lift = 0.45 * Math.abs(2 * u - 1) ** 4 * (1 - v) ** 2; // 四角起翹
+      tilePos.push(ex + (rx - ex) * v, eave + (ridge - eave) * v ** 1.7 + lift, ez + (rz - ez) * v);
+      tileUv.push(u * eLen / 0.3, v * 6);
+    }
+    for (let j = 0; j < N; j++) for (let k = 0; k < N; k++) {
+      const a = base + j * (N + 1) + k, b = a + 1, c = a + N + 1, d = c + 1;
+      tileIdx.push(a, b, c, b, d, c);
+    }
+  }
+  const roofGeo = new THREE.BufferGeometry();
+  roofGeo.setAttribute('position', new THREE.Float32BufferAttribute(tilePos, 3));
+  roofGeo.setAttribute('uv', new THREE.Float32BufferAttribute(tileUv, 2));
+  roofGeo.setIndex(tileIdx);
+  roofGeo.computeVertexNormals();
+  if (roofGeo.attributes.normal.getY(N + 2) < 0) { roofGeo.setIndex(tileIdx.map((_, i) => tileIdx[i - (i % 3) + [0, 2, 1][i % 3]])); roofGeo.computeVertexNormals(); }
+  const tileTex = signTex(64, 64, (c, w, h) => {
+    c.fillStyle = '#2f4a3a'; c.fillRect(0, 0, w, h);
+    const grd = c.createLinearGradient(0, 0, w, 0);
+    grd.addColorStop(0, '#22382b'); grd.addColorStop(0.5, '#4b6b55'); grd.addColorStop(1, '#22382b');
+    c.fillStyle = grd; c.fillRect(0, 0, w, h);
+    c.fillStyle = 'rgba(0,0,0,.25)'; c.fillRect(0, h - 6, w, 6);
+  });
+  tileTex.wrapS = tileTex.wrapT = THREE.RepeatWrapping;
+  add(roofGeo, new THREE.MeshStandardMaterial({ map: tileTex, roughness: 0.55, metalness: 0.05 }), 0, 0, 0);
+  const under = add(roofGeo, new THREE.MeshStandardMaterial({ color: 0x5a3b28, roughness: 0.9, side: THREE.BackSide }), 0, -0.08, 0);
+  under.castShadow = false;
+  add(new THREE.BoxGeometry(rl * 2 + 0.4, 0.22, 0.26), new THREE.MeshStandardMaterial({ color: 0x24362b, roughness: 0.6 }), 0, ridge + 0.08, 0); // 屋脊
+
+  // 匾額：掛在面向道路的長邊橫樑下
+  const sd = Math.sign((r.x[q.i] - cx) * bx + (r.z[q.i] - cz) * bz) || 1, text = l.name.replace(/涼亭$/, '') || l.name;
+  const plaque = signTex(384, 128, (c, w, h) => {
+    c.fillStyle = '#5a2418'; c.fillRect(0, 0, w, h);
+    c.strokeStyle = '#d4a548'; c.lineWidth = 8; c.strokeRect(6, 6, w - 12, h - 12);
+    c.fillStyle = '#e8c15a'; c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.font = 'bold 76px serif'; c.fillText(text, w / 2, h * 0.54);
+  });
+  const pm = add(new THREE.PlaneGeometry(1.5, 0.5), new THREE.MeshStandardMaterial({ map: plaque, roughness: 0.6 }), 0, top + H - 0.6, sd * (hv + 0.13));
+  pm.rotation.y = sd > 0 ? 0 : Math.PI;
+  group.add(g);
+}
+
+// 題字岩壁：OSM 岩壁外框處立一面粗糙的岩塊，面向最近的路段，正面刻大紅字（例如風櫃嘴前的「佛」）
+function buildInscription(group, l, ctx) {
+  const { r, nearest } = ctx, ground = ctx.surface ?? ctx.ground, P = ring(l.p, r);
+  const cx = P.reduce((a, p) => a + p[0], 0) / P.length, cz = P.reduce((a, p) => a + p[1], 0) / P.length, q = nearest(cx, cz);
+  let fx = r.x[q.i] - cx, fz = r.z[q.i] - cz;
+  const fl = Math.hypot(fx, fz) || 1; fx /= fl; fz /= fl;
+  const span = P.length > 2 ? Math.max(...P.map(([x, z]) => Math.abs((x - cx) * fz - (z - cz) * fx))) * 2 : 0;
+  const W = Math.min(16, Math.max(9, span * 1.2)), H = W * 0.55, D = 5;
+  const gs = [-1, 0, 1].map((t) => ground(cx + fz * t * W / 2, cz - fx * t * W / 2));
+  const base = Math.min(...gs) - 2.5, top = Math.max(...gs) + H, Ht = top - base;
+  // 岩塊：細分的方塊依位置雜訊推擠（同一位置推擠量相同，面與面的接縫不會裂開），正面推得少、保持平整好刻字；
+  // 上窄下寬、頂部參差、整面往後傾，看起來像山坡露出的岩壁而不是方塊
+  const geo = new THREE.BoxGeometry(W, Ht, D, 16, 12, 5), pos = geo.attributes.position;
+  const nz = (x, y, z) => Math.sin(x * 1.7 + y * 0.9) * Math.cos(z * 1.3 - y * 1.1) + Math.sin(x * 0.6 - z * 2.1 + y * 0.4) * 0.6;
+  const ridge = (x) => Math.sin(x * 0.9) * 0.6 + Math.sin(x * 2.3 + 1) * 0.35 - Math.abs(x / (W / 2)) ** 2 * 1.8;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i), t = y / Ht + 0.5, front = z > D / 2 - 0.01 ? 0.25 : 1;
+    const k = nz(x, y, z) * 0.6 * front;
+    pos.setXYZ(i, x * (1 - 0.3 * t) + k * 0.3, y + t * t * ridge(x) + k * 0.4 * t, z + k - t * 1.6);
+  }
+  geo.computeVertexNormals();
+  const rockTex = signTex(256, 256, (c, w, h) => {
+    c.fillStyle = '#7d786e'; c.fillRect(0, 0, w, h);
+    for (let k = 0; k < 3000; k++) { const g = 90 + Math.random() * 70; c.fillStyle = `rgba(${g},${g - 2},${g - 10},.8)`; c.fillRect(Math.random() * w, Math.random() * h, 2 + Math.random() * 3, 2); }
+    c.strokeStyle = 'rgba(40,38,34,.35)'; c.lineWidth = 2;
+    for (let k = 0; k < 14; k++) { c.beginPath(); c.moveTo(Math.random() * w, 0); c.lineTo(Math.random() * w, h); c.stroke(); } // 岩縫
+  });
+  rockTex.wrapS = rockTex.wrapT = THREE.RepeatWrapping;
+  const rock = new THREE.MeshStandardMaterial({ map: rockTex, roughness: 0.95 });
+  const face = signTex(512, 512, (c, w, h) => {
+    c.drawImage(rockTex.image, 0, 0, w, h);
+    c.fillStyle = '#b3261e'; c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.font = `bold ${l.name.length > 1 ? Math.floor(380 / l.name.length) : 380}px serif`;
+    c.fillText(l.name, w / 2, h * 0.47);
+    c.fillStyle = 'rgba(120,115,105,.35)'; // 風化：字面上零星褪色
+    for (let k = 0; k < 400; k++) c.fillRect(Math.random() * w, Math.random() * h, 3, 3);
+  });
+  const faceMat = new THREE.MeshStandardMaterial({ map: face, roughness: 0.85 });
+  const m = new THREE.Mesh(geo, [rock, rock, rock, rock, faceMat, rock]);
+  // 字只佔正面上半部：正面 UV 的 v 從底到頂，把字壓在地面以上
+  const uv = geo.attributes.uv, frontStart = geo.groups[4].start, frontCount = geo.groups[4].count, idx = geo.index;
+  const lo = (Math.max(...gs) - base) / (top - base);
+  for (let i = frontStart; i < frontStart + frontCount; i++) { const v = idx.getX(i); uv.setY(v, Math.max(0, (pos.getY(v) / (top - base) + 0.5 - lo) / (1 - lo))); }
+  m.position.set(cx, (top + base) / 2, cz);
+  m.rotation.y = Math.atan2(fx, fz);
+  m.castShadow = m.receiveShadow = true;
+  group.add(m);
 }

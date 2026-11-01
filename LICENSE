@@ -23,14 +23,14 @@ SOFTWARE.
 --------------------------------------------------------------------------------
 Third-party content in this repository is NOT covered by the MIT License above:
 
-- assets/osm/yuanshan.json, assets/routes/zhongshe.gpx,
-  buildings/roads/streams in assets/routes/zhongshe.scene.json
+- assets/osm/yuanshan.json, assets/routes/*.gpx (zhongshe, fengguizui),
+  buildings/roads/streams in assets/routes/*.scene.json
   Derived from OpenStreetMap data, © OpenStreetMap contributors.
   Made available under the Open Database License (ODbL) 1.0:
   https://opendatacommons.org/licenses/odbl/1-0/
   See https://www.openstreetmap.org/copyright
 
-- Elevation in assets/routes/zhongshe.gpx and terrain in assets/routes/zhongshe.scene.json
+- Elevation in assets/routes/*.gpx and terrain in assets/routes/*.scene.json
   Ministry of the Interior (Taiwan) 20m Digital Terrain Model,
   Open Government Data License, version 1.0: https://data.gov.tw/license
 

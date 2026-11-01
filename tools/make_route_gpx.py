@@ -5,7 +5,8 @@
   /opt/homebrew/bin/python3 tools/make_route_gpx.py 中社路 --names 中社路一段,中社路二段 \
       --bbox 25.08,121.52,25.16,121.60 --title 中社路 --out assets/routes/zhongshe.gpx
 
-- 路段：Overpass 抓取 bbox 內符合名稱的道路，依端點自動串接成一條線（從離其他路段最遠的端點開始）
+- 路段：Overpass 抓取 bbox 內符合名稱的道路，依端點自動串接成一條線（從離其他路段最遠的端點開始）；
+  同名道路有支線時加 --from / --to，改取兩點間的最短路徑
 - 高度：OpenTopoData 的 SRTM 與 ASTER 30m 平均，再以約 60m 的高斯平滑去除地形雜訊
 - 方向：預設由低往高（爬坡）；加 --downhill 反轉
 - 實景場景（--dem 內政部 20m DTM 資料夾 + --scene 輸出檔）：路線高度改用 DTM，另輸出周邊地形格網與 OSM 房屋、道路
@@ -13,7 +14,7 @@
 地圖資料 © OpenStreetMap contributors（ODbL）；高度資料 SRTM（公眾領域）、ASTER GDEM（NASA/METI）、
 內政部 20m DTM（政府資料開放授權條款第 1 版）。
 """
-import argparse, base64, hashlib, json, math, struct, sys, time, urllib.parse, urllib.request
+import argparse, base64, hashlib, heapq, json, math, struct, sys, time, urllib.parse, urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -73,6 +74,37 @@ def chain(ways):
     return line
 
 
+def shortest(ways, a, b):
+    """在路網上找 a → b（經緯度）的最短路徑；點同 chain() 帶所屬 way 編號。適合同名道路有支線、只走其中一部分時。"""
+    G = {}
+    for w in ways:
+        for p, q in zip(w, w[1:]):
+            k1, k2, L = p[:2], q[:2], dist(p, q)
+            G.setdefault(k1, []).append((k2, L, q[2]))
+            G.setdefault(k2, []).append((k1, L, q[2]))
+    s, t = min(G, key=lambda p: dist(p, a)), min(G, key=lambda p: dist(p, b))
+    best, prev, pq = {s: 0}, {}, [(0, s)]
+    while pq:
+        c, u = heapq.heappop(pq)
+        if u == t:
+            break
+        if c > best[u]:
+            continue
+        for v, L, wi in G[u]:
+            if c + L < best.get(v, 1e18):
+                best[v], prev[v] = c + L, (u, wi)
+                heapq.heappush(pq, (c + L, v))
+    if t not in prev:
+        sys.exit('--from 與 --to 之間沒有相連的道路')
+    line, u = [], t
+    while u in prev:
+        u0, wi = prev[u]
+        line.append((*u, wi))
+        u = u0
+    line.append((*s, line[-1][2]))
+    return line[::-1]
+
+
 def resample(pts, step):
     L = [0.0]
     for i in range(1, len(pts)):
@@ -123,11 +155,11 @@ def outer_rings(el):
 
 
 def landmarks(pts, s, w, n, e):
-    """路線旁的派出所、學校（含球場、遊戲場）、公車迴轉道、公車站牌、終點旁的步道入口與廁所。"""
+    """路線旁的派出所、學校（含球場、遊戲場）、公車站牌，終點旁的公車迴轉道、步道入口、廁所與涼亭。"""
     bb = f'{s},{w},{n},{e}'
     q = (f'[out:json][timeout:120];(nwr["amenity"~"^(police|school)$"]({bb});way["leisure"~"^(pitch|playground|track)$"]({bb});'
          f'node["highway"~"^(turning_circle|turning_loop|bus_stop)$"]({bb});way["highway"~"^(path|footway|steps)$"]["name"~"步道"]({bb});'
-         f'node["amenity"="toilets"]({bb}););out geom;')
+         f'node["amenity"="toilets"]({bb});way["amenity"="shelter"]({bb});node["place"="locality"]({bb}););out geom;')
     res = cached(q, lambda: overpass(q))
     near = lambda ll: min(dist(ll, p) for p in pts[::2])
     R6 = lambda ring: [[round(a, 6), round(b, 6)] for a, b in ring]
@@ -140,17 +172,24 @@ def landmarks(pts, s, w, n, e):
             if not rings or not rings[0]:
                 continue
             d = min(near(p) for p in rings[0])
-            if d < (150 if tg['amenity'] == 'police' else 300):
+            if d < (150 if tg['amenity'] == 'police' else 120):  # 學校要緊鄰路線（校門招牌立在路旁）
                 out.append({'t': tg['amenity'], 'name': tg.get('name', ''), 'p': R6(rings[0])})
                 if tg['amenity'] == 'school':
                     schools.append(rings[0])
-        elif tg.get('highway') in ('turning_circle', 'turning_loop') and near(ll) < 40:
+        elif tg.get('highway') in ('turning_circle', 'turning_loop') and dist(ll, pts[-1]) < 60:  # 終點的迴轉道
             out.append({'t': 'turning', 'name': tg.get('name', ''), 'p': R6([ll])})
         elif tg.get('highway') == 'bus_stop' and near(ll) < 25:
             out.append({'t': 'bus', 'name': tg.get('name', ''), 'p': R6([ll])})
         elif tg.get('amenity') == 'toilets':
             if dist(ll, pts[-1]) < 60:  # 終點旁的廁所
                 out.append({'t': 'toilets', 'p': R6([ll])})
+        elif tg.get('amenity') == 'shelter' and el.get('geometry'):
+            ring = outer_rings(el)[0]
+            if min(dist(p, pts[-1]) for p in ring) < 60:  # 終點旁的涼亭；沒有名稱時用附近的地名（例如「風櫃嘴」）+「涼亭」
+                place = min((x for x in res['elements'] if x.get('tags', {}).get('place') == 'locality'),
+                            key=lambda x: dist((x['lat'], x['lon']), pts[-1]), default=None)
+                name = tg.get('name') or (place and dist((place['lat'], place['lon']), pts[-1]) < 150 and place['tags']['name'] + '涼亭') or '涼亭'
+                out.append({'t': 'shelter', 'name': name, 'p': R6(ring)})
         elif tg.get('highway') in ('path', 'footway', 'steps') and el.get('geometry'):
             g = [(p['lat'], p['lon']) for p in el['geometry']]
             if dist(g[-1], pts[-1]) < dist(g[0], pts[-1]):
@@ -172,6 +211,20 @@ def landmarks(pts, s, w, n, e):
             if any(min(r[0] for r in sc) <= c[0] <= max(r[0] for r in sc) and min(r[1] for r in sc) <= c[1] <= max(r[1] for r in sc) for sc in schools):
                 out.append({'t': tg['leisure'], 'p': R6(ring)})
     print('地標：' + '、'.join(f"{x['t']}{(':' + x['name']) if x.get('name') else ''}" for x in out if x['t'] != 'bus') + f"，公車站 {sum(x['t'] == 'bus' for x in out)} 個")
+    return out
+
+
+def inscriptions(specs):
+    """岩壁題字：OSM 不會記錄岩壁上寫的字，由參數指定位置與文字，外框取附近的 natural=cliff/rock。"""
+    out = []
+    for spec in specs:
+        lat, lon, text = spec.split(',', 2)
+        ll = (float(lat), float(lon))
+        q = f'[out:json][timeout:60];way["natural"~"^(cliff|rock|bare_rock)$"](around:40,{lat},{lon});out geom;'
+        rocks = [outer_rings(el)[0] for el in cached(q, lambda: overpass(q))['elements'] if el.get('geometry')]
+        ring = min(rocks, key=lambda g: min(dist(p, ll) for p in g)) if rocks else [ll]
+        out.append({'t': 'inscription', 'name': text, 'p': [[round(a, 6), round(b, 6)] for a, b in ring]})
+        print(f'題字：{text}（{"OSM 岩壁" if rocks else "指定點"}）')
     return out
 
 
@@ -217,16 +270,20 @@ def tm2(lat, lon, lon0=121.0, k0=0.9999, fe=250000.0):
 
 
 class Dem:
-    def __init__(self, folder):
+    """folders：一或多個解壓資料夾（路線跨縣市時，例如風櫃嘴東側屬新北市）；bbox：只留 TM2 範圍 (x0, y0, x1, y1) 內的點"""
+    def __init__(self, folders, bbox=None):
         self.g = {}
-        files = sorted(Path(folder).glob('*.grd'))
+        files = sorted(fp for f in folders for fp in Path(f).glob('*.grd'))
         if not files:
-            sys.exit(f'{folder} 裡沒有 .grd 檔')
+            sys.exit(f'{", ".join(map(str, folders))} 裡沒有 .grd 檔')
+        x0, y0, x1, y1 = bbox or (-1e9, -1e9, 1e9, 1e9)
         for fp in files:
             for line in fp.read_text(errors='ignore').splitlines():
                 v = line.split()
                 if len(v) == 3:
-                    self.g[(round(float(v[0]) / 20), round(float(v[1]) / 20))] = float(v[2])
+                    x, y = float(v[0]), float(v[1])
+                    if x0 <= x <= x1 and y0 <= y <= y1:
+                        self.g[(round(x / 20), round(y / 20))] = float(v[2])
         print(f'DTM：{len(files)} 幅、{len(self.g)} 點')
 
     def at(self, lat, lon):
@@ -263,7 +320,7 @@ def dem_grid(dem, s, w, n, e, step=20.0):
             'h': base64.b64encode(struct.pack(f'<{len(flat)}h', *flat)).decode()}
 
 
-def osm_features(s, w, n, e, skip_names):
+def osm_features(s, w, n, e, skip_ids):
     bb = f'{s},{w},{n},{e}'
     q = (f'[out:json][timeout:120];(way["building"]({bb});way["highway"]({bb});'
          f'way["natural"="water"]({bb});way["waterway"~"river|stream"]({bb}););out geom tags;')
@@ -280,7 +337,7 @@ def osm_features(s, w, n, e, skip_names):
             except ValueError:
                 h = 0
             out['buildings'].append({'p': P(el), 'h': round(h or 7, 1)})
-        elif 'highway' in tg and tg.get('name') not in skip_names and tg['highway'] not in ('footway', 'path', 'steps', 'track', 'cycleway', 'bridleway', 'corridor', 'elevator', 'platform'):
+        elif 'highway' in tg and el['id'] not in skip_ids and tg['highway'] not in ('footway', 'path', 'steps', 'track', 'cycleway', 'bridleway', 'corridor', 'elevator', 'platform'):
             out['roads'].append({'t': tg['highway'], 'p': P(el)})
         elif tg.get('waterway') in ('river', 'stream'):
             out['streams'].append({'t': tg['waterway'], 'p': P(el)})
@@ -295,11 +352,18 @@ def main():
     ap.add_argument('--bbox', required=True, help='south,west,north,east')
     ap.add_argument('--title')
     ap.add_argument('--out', required=True)
+    ap.add_argument('--from', dest='from_', help='起點附近 lat,lon（與 --to 一起用：只取兩點間的最短路徑）')
+    ap.add_argument('--to', help='終點附近 lat,lon')
     ap.add_argument('--step', type=float, default=20)
     ap.add_argument('--downhill', action='store_true')
-    ap.add_argument('--dem', help='內政部 20m DTM 解壓資料夾（.grd）')
+    ap.add_argument('--dem', help='內政部 20m DTM 解壓資料夾（.grd），跨縣市時以逗號分隔多個')
     ap.add_argument('--scene', help='輸出實景場景 JSON（需 --dem）')
     ap.add_argument('--margin', type=float, default=1200, help='場景地形外擴（m）')
+    ap.add_argument('--inscription', action='append', default=[], metavar='LAT,LON,文字',
+                    help='岩壁題字：取該點附近 OSM 的岩壁（natural=cliff/rock）外框，沒有就用該點（例如風櫃嘴前的「佛」字）')
+    ap.add_argument('--skip', default='', help='不要的地標名稱，逗號分隔（OSM 有標、但實際不在路旁的，例如風櫃嘴的溪山派出所）')
+    ap.add_argument('--open', action='append', default=[], metavar='S0-S1:L|R',
+                    help='路旁視野開闊、不種樹的路段（距起點公尺，L 左側 / R 右側；S1 省略表示到終點）')
     a = ap.parse_args()
 
     names = (a.names or a.name).split(',')
@@ -310,10 +374,19 @@ def main():
     if not els:
         sys.exit('找不到道路')
     meta = [w.get('tags', {}) for w in els]
-    pts = resample(chain([[(p['lat'], p['lon'], wi) for p in w['geometry']] for wi, w in enumerate(els)]), a.step)
+    lines = [[(p['lat'], p['lon'], wi) for p in w['geometry']] for wi, w in enumerate(els)]
+    if a.from_ and a.to:
+        ll = lambda v: tuple(map(float, v.split(',')))
+        pts = resample(shortest(lines, ll(a.from_), ll(a.to)), a.step)
+    else:
+        pts = resample(chain(lines), a.step)
     owner = [p[2] for p in pts]
     pts = [(p[0], p[1]) for p in pts]
-    dem = Dem(ROOT / a.dem) if a.dem else None
+    dem = None
+    if a.dem:
+        xy = [tm2(lat, lon) for lat, lon in pts]
+        m = a.margin + 200
+        dem = Dem([ROOT / f for f in a.dem.split(',')], (min(p[0] for p in xy) - m, min(p[1] for p in xy) - m, max(p[0] for p in xy) + m, max(p[1] for p in xy) + m))
     if dem:
         raw = [dem.at(lat, lon) for lat, lon in pts]
         if None in raw:
@@ -367,7 +440,11 @@ def main():
         s, n, w, e = min(lats) - mlat, max(lats) + mlat, min(lons) - mlon, max(lons) + mlon
         scene = {'dem': dem_grid(dem, s, w, n, e)}
         k = 500 / a.margin  # 房屋、道路只取路線外 500m 內
-        scene.update(osm_features(min(lats) - mlat * k, min(lons) - mlon * k, max(lats) + mlat * k, max(lons) + mlon * k, set(names)))
+        # 側路不重畫路線本身：整條都在路線上的 way 略過（同名道路的支線、只走一部分的 way 仍畫出來，靠近路線處由前端截斷）
+        def on_route(w_):
+            return all(min(dist((p['lat'], p['lon']), q) for q in pts) < 12 for p in w_['geometry'])
+        skip = {w_['id'] for w_ in els if on_route(w_)}
+        scene.update(osm_features(min(lats) - mlat * k, min(lons) - mlon * k, max(lats) + mlat * k, max(lons) + mlon * k, skip))
         cum = [0.0]
         for i in range(1, len(pts)):
             cum.append(cum[-1] + dist(pts[i - 1], pts[i]))
@@ -383,6 +460,13 @@ def main():
                 i += 1
         scene['route'] = {'s': [round(x, 1) for x in cum], 'w': [road_width(meta[o]) for o in owner], 'bridges': bridges}
         scene['landmarks'] = landmarks(pts, min(lats) - mlat * 0.25, min(lons) - mlon * 0.25, max(lats) + mlat * 0.25, max(lons) + mlon * 0.25)
+        scene['landmarks'] += inscriptions(a.inscription)
+        skip = set(filter(None, a.skip.split(',')))
+        scene['landmarks'] = [l for l in scene['landmarks'] if l.get('name') not in skip]
+        for o in a.open:  # 例如 5200-:L
+            rng, side = o.split(':')
+            s0, s1 = rng.split('-')
+            scene['route'].setdefault('open', []).append([float(s0), float(s1) if s1 else round(total, 1), side.upper()])
         print('橋：' + '、'.join(f'{b[2]}（{b[0]:.0f}–{b[1]:.0f} m）' for b in bridges) + '；路寬 ' + '、'.join(sorted({f'{w:g}' for w in scene['route']['w']})) + ' m')
         scene['credits'] = ['© OpenStreetMap contributors (ODbL)', '地形：內政部 20m DTM（政府資料開放授權條款第 1 版）']
         sp = ROOT / a.scene

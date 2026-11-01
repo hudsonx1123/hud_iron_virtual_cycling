@@ -3,6 +3,7 @@
 
 export const BUILTIN_ROUTES = [
   { file: 'assets/routes/zhongshe.gpx', scene: 'assets/routes/zhongshe.scene.json', name: '中社路', nameEn: 'Zhongshe Rd climb' },
+  { file: 'assets/routes/fengguizui.gpx', scene: 'assets/routes/fengguizui.scene.json', name: '風櫃嘴', nameEn: 'Fengguizui climb' },
 ];
 
 export function parseGpx(text, fallbackName = 'GPX') {
