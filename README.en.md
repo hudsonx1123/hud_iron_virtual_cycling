@@ -67,8 +67,6 @@ Shortcuts: `1`–`5` camera views, Space start/pause, Up/Down arrows adjust the 
 
 ![Zhongshe Rd](docs/screenshots/route-en.jpg)
 
-![Zhongshe Rd real terrain and orthophoto (aerial view)](docs/screenshots/route-aerial.jpg)
-
 ## License
 - Code: [MIT License](LICENSE)
 - `assets/osm/yuanshan.json`, `assets/routes/zhongshe.gpx`, `assets/routes/zhongshe.scene.json`: derived from OpenStreetMap data, © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors, available under the [ODbL 1.0](https://opendatacommons.org/licenses/odbl/1-0/) (not MIT)

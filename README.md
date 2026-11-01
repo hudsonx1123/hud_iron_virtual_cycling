@@ -67,8 +67,6 @@ python3 tools/serve.py        # 本機伺服器（不快取，改完程式重新
 
 ![中社路](docs/screenshots/route-zh.jpg)
 
-![中社路實景地形與航照（上空視角）](docs/screenshots/route-aerial.jpg)
-
 ## 授權
 - 程式碼：[MIT License](LICENSE)
 - `assets/osm/yuanshan.json`、`assets/routes/zhongshe.gpx`、`assets/routes/zhongshe.scene.json`：由 OpenStreetMap 資料整理而成，© [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors，採 [ODbL 1.0](https://opendatacommons.org/licenses/odbl/1-0/) 授權（不適用 MIT）
