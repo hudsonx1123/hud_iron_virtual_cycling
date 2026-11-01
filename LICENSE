@@ -23,11 +23,22 @@ SOFTWARE.
 --------------------------------------------------------------------------------
 Third-party content in this repository is NOT covered by the MIT License above:
 
-- assets/osm/yuanshan.json
+- assets/osm/yuanshan.json, assets/routes/zhongshe.gpx,
+  buildings/roads/streams in assets/routes/zhongshe.scene.json
   Derived from OpenStreetMap data, © OpenStreetMap contributors.
   Made available under the Open Database License (ODbL) 1.0:
   https://opendatacommons.org/licenses/odbl/1-0/
   See https://www.openstreetmap.org/copyright
+
+- Elevation in assets/routes/zhongshe.gpx and terrain in assets/routes/zhongshe.scene.json
+  Ministry of the Interior (Taiwan) 20m Digital Terrain Model,
+  Open Government Data License, version 1.0: https://data.gov.tw/license
+
+- Orthophotos shown in the app are © National Land Surveying and Mapping Center (NLSC),
+  loaded at runtime from its WMTS service. No image tiles are stored in this repository.
+  The screenshots docs/screenshots/route-*.jpg contain rendered views that include this
+  imagery; they are shown with source attribution under the NLSC terms of use:
+  https://maps.nlsc.gov.tw/pro/use_clause.jsp
 
 - assets/hdri/, assets/tex/, assets/models/
   From Poly Haven (https://polyhaven.com), released under CC0 1.0 (public domain):

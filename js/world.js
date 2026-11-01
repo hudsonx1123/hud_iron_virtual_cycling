@@ -13,6 +13,8 @@ import { buildRider } from './rider.js';
 import { leafAtlas, broadleaf, conifer, bush } from './trees.js';
 import { loadRiderModel } from './riderModel.js';
 import { buildCity } from './city.js';
+import { buildRouteScene } from './routeScene.js';
+import { makeTerrain, loadAerial } from './realScene.js';
 
 // 世界座標：道路沿 +Z 無限延伸，車手組（rig）向 +Z 前進，地景以 100m 區塊循環重建。
 // 素材：Poly Haven（CC0）的 HDRI 天空、柏油/草地/林地 PBR 材質、草叢/蕨類/岩石模型。
@@ -290,6 +292,24 @@ export class World {
   }
 
   async buildMap() {
+    if (this.map === 'route' && this.routeData) {
+      // GPX 路線
+      this.scene.fog.density = 0.0011;
+      this.mountains.scale.set(2.6, 1.2, 2.6); // 放在路線地形之外
+      this.mountains.material.fog = true;
+      this.mountains.material.needsUpdate = true;
+      this.farGround.visible = false;
+      const r = this.routeData;
+      let real = null;
+      if (r.real) { // 實景：真實地形 + 正射航照（離線時退回程式生成的地面）
+        const terrain = makeTerrain(r, r.real.dem);
+        const aerial = await loadAerial(r, terrain, this.renderer).catch((e) => { console.warn('aerial', e); return null; });
+        real = { ...terrain, aerial, scene: r.real };
+      }
+      if (this.routeData !== r) return; // 載入期間換了路線
+      this.city = buildRouteScene(this, r, real);
+      return;
+    }
     if (this.map === 'yuanshan') {
       // 真實地點：圓山交流道（OpenStreetMap）
       this.scene.fog.density = 0.00045;
@@ -311,9 +331,9 @@ export class World {
   }
 
   // 不重新載入頁面切換場景（課表進度與藍牙連線不受影響）
-  async setMap(name) {
+  async setMap(name, force) {
     await this.ready;
-    if (name === this.map) return;
+    if (name === this.map && !force) return;
     // 共用素材（樹、植被、護欄等）留著給下一個場景用，只釋放場景自己的幾何與材質
     const keep = new Set([this.roadMat, this.groundMat, this.lineMat, this.barrierGeo, this.barrierMat, this.signGeo, ...[].concat(this.signMats),
       ...this.treeKinds.flatMap((k) => [k.wood, k.bark, k.leaves, k.leafMat]),
@@ -573,14 +593,15 @@ export class World {
   }
 
   // ---------- 每幀 ----------
-  update(dt, { speed, cadence }) {
+  update(dt, { speed, cadence, routeD = 0 }) {
     this.crank += (cadence * Math.PI * 2 / 60) * dt;
     this.wheel += (speed / WHEEL_R) * dt;
     this.bike.update(this.crank, this.wheel);
     this.rider.update(this.crank);
 
     const route = this.city?.route;
-    if (route) this.followRoute(route, speed * dt);
+    if (route?.fixed) this.placeOnRoute(route, routeD);
+    else if (route) this.followRoute(route, speed * dt);
     const rz = route ? this.rig.position.z : (this.rig.position.z += speed * dt);
     for (const c of this.chunks) {
       if (c.z0 + CH < rz - CH) this.fillChunk(c, c.z0 + NCH * CH);
@@ -598,7 +619,7 @@ export class World {
     this.sun.position.copy(this.rig.position).addScaledVector(this.sunDir, 90);
     this.sun.target.position.copy(this.rig.position);
     if (this.mountains) {
-      this.mountains.position.set(route ? this.rig.position.x : 0, 0, rz);
+      this.mountains.position.set(route ? this.rig.position.x : 0, route?.fixed ? this.rig.position.y - 40 : 0, rz);
       this.farGround.position.z = rz;
     }
   }
@@ -612,6 +633,24 @@ export class World {
     const yaw = Math.atan2(t.x, t.z), pitch = -Math.atan2(t.y, Math.hypot(t.x, t.z));
     this.rig.rotation.set(pitch, yaw, 0, 'YXZ');
     (this.headingQ ||= new THREE.Quaternion()).setFromAxisAngle(V(0, 1, 0), yaw);
+  }
+
+  async setRoute(data) {
+    this.routeData = data;
+    await this.setMap('route', true);
+  }
+
+  // GPX 路線：位置由外部（依功率與坡度算出的距離）決定
+  placeOnRoute(route, d) {
+    const r = route.data, f = Math.min(r.s.length - 1.0001, Math.max(0, d / r.step)), i = Math.floor(f), t = f - i;
+    const L = (a) => a[i] + (a[i + 1] - a[i]) * t;
+    const hx = L(r.tx), hz = L(r.tz), yaw = Math.atan2(hx, hz);
+    // 騎士靠右，在右側車道中央（本地 -X 為右側）
+    const lane = -(r.hw ? L(r.hw) : 3) / 2;
+    this.rig.position.set(L(r.x) + Math.cos(yaw) * lane, L(r.y) + 0.03, L(r.z) - Math.sin(yaw) * lane);
+    this.rig.rotation.set(-Math.atan(L(r.grade) / 100), yaw, 0, 'YXZ');
+    (this.headingQ ||= new THREE.Quaternion()).setFromAxisAngle(V(0, 1, 0), yaw);
+    route.updateNear(d);
   }
 
   render() {

@@ -2,6 +2,7 @@ import { Trainer, HRMonitor, bleSupported } from './ble.js';
 import { World } from './world.js';
 import { SAMPLES, parseWorkoutFile, targetAt, totalTSS, dateFromName } from './workout.js';
 import { t, lang, setLang, applyI18n, onLangChange } from './i18n.js';
+import { BUILTIN_ROUTES, parseGpx, compactPts, buildRoute, routeAt, gradeColor } from './route.js';
 
 const $ = (id) => document.getElementById(id);
 const store = (k, v) => { try { localStorage[k] = JSON.stringify(v); } catch {} };
@@ -24,6 +25,10 @@ const S = {
   lastSegIdx: -1,
   tab: 'today',
   sched: load('sched', []),
+  route: null,   // 騎乘中的 GPX 路線
+  routeD: 0,     // 路線上的距離（m）
+  v: 0,          // 路線模式的虛擬速度（m/s，依功率與坡度計算）
+  preview: 0,    // 快轉預覽倍數（0 = 關閉；1 倍 = 30 km/h）
 };
 
 // ---------- 藍牙 ----------
@@ -77,7 +82,17 @@ const wName = (w) => (lang === 'en' && w.nameEn) || w.name;
 function updateLabels() {
   const w = S.workout;
   $('btnStart').textContent = t(S.running ? 'pause' : S.t > 0 && (!w || targetAt(w, S.t)) ? 'resume' : 'start');
-  $('wname').textContent = w ? `${wName(w)} · ${fmt(w.total)}` : t('freeRide');
+  const R = S.route;
+  $('wname').textContent = w ? `${wName(w)} · ${fmt(w.total)}` : R ? `📍 ${wName(R)} · ${(R.total / 1000).toFixed(1)} km` : t('freeRide');
+  const opt = $('mapRoute');
+  opt.hidden = !R;
+  if (R) opt.textContent = '📍 ' + wName(R);
+  if (!R) S.preview = 0;
+  const pb = $('btnPreview');
+  pb.hidden = !R;
+  pb.textContent = S.preview ? `⏩ ×${S.preview}` : t('preview');
+  pb.classList.toggle('on', !!S.preview);
+  chart.classList.toggle('seek', !!R && !w);
 }
 
 // 有選課表時 ERG 一律依課表瓦數（開始前、暫停中都是目前位置的目標）；沒有課表才用手動目標
@@ -104,6 +119,7 @@ document.querySelectorAll('[data-adj]').forEach((b) => (b.onclick = () => adjust
 
 function toggleRun() {
   if (S.workout && !S.running && targetAt(S.workout, S.t) === null) S.t = 0; // 重新開始
+  if (!S.workout && S.route && S.routeD >= S.route.total) { S.routeD = 0; S.v = 0; S.t = 0; } // 路線騎完：從頭再騎
   S.running = !S.running;
   updateLabels();
 }
@@ -130,17 +146,29 @@ function simulate(dt, target) {
   d.simPower = pw;
 }
 
+// ---------- 路線騎乘物理 ----------
+// m·dv/dt = P/v − (½ρ·CdA·v² + Crr·m·g·cosθ + m·g·sinθ)；騎士+車 82kg、CdA 0.24（三鐵車空力姿勢）、Crr 0.004
+function ridePhysics(v, P, grade, dt) {
+  const m = 82, g = 9.81, th = Math.atan(grade / 100);
+  const drive = P / Math.max(v, 0.5); // 低速時推力 = P/v（下限 0.5 m/s，避免起步除以零；太高會讓陡坡爬不上去）
+  const resist = 0.5 * 1.226 * 0.24 * v * v * Math.sign(v) + 0.004 * m * g * Math.cos(th) + m * g * Math.sin(th);
+  return Math.max(0, v + ((drive - resist) / (m + 1.5)) * dt);
+}
+
 // ---------- HUD ----------
 function updateHud(info, now) {
   const d = S.d, pw = S.sim && !trainer.connected ? d.simPower ?? 0 : d.power;
   const el = $('powerV');
   el.firstChild.nodeValue = trainer.connected || S.sim ? Math.round(pw) : '--';
   el.style.color = zoneColor(pw / S.ftp);
-  $('tgt').textContent = S.target;
+  const R = S.route, here = R && routeAt(R, S.routeD), simMode = R && !S.workout;
+  $('tgtLabel').textContent = t(simMode ? 'grade' : 'ergTarget');
+  $('tgt').textContent = simMode ? here.grade.toFixed(1) : S.target;
+  $('tgtUnit').textContent = simMode ? '%' : 'W';
   $('hrV').firstChild.nodeValue = d.hr ? Math.round(d.hr) : '--';
   $('cadV').firstChild.nodeValue = d.cadence ? Math.round(d.cadence) : '--';
   $('spdV').firstChild.nodeValue = d.speed.toFixed(1);
-  $('distV').textContent = S.dist.toFixed(2);
+  $('distV').textContent = (R ? S.routeD / 1000 : S.dist).toFixed(2);
   $('elapsed').textContent = fmtHMS(S.t);
   $('clock').textContent = new Date().toLocaleTimeString(lang === 'en' ? 'en-GB' : 'zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false });
   if (info) {
@@ -150,6 +178,12 @@ function updateHud(info, now) {
   } else if (S.workout) {
     $('step').textContent = t('done', { w: S.target });
     $('stepNext').textContent = t('again');
+  } else if (R) {
+    const done = S.routeD >= R.total;
+    $('step').textContent = done ? t('routeDone', { n: wName(R) }) : `${here.grade.toFixed(1)}% · ${t('remainKm', { d: ((R.total - S.routeD) / 1000).toFixed(2) })}`;
+    const mark = R.marks?.find((m) => m.s - S.routeD < 150 && m.s - S.routeD > -30); // 前方 150m 內的地標
+    const info = t('climbInfo', { a: Math.round(here.climbed), b: Math.round(R.gain), e: Math.round(here.ele) });
+    $('stepNext').textContent = done ? t('routeAgain') : mark ? `📍 ${mark.kind === 'turning' ? t('finishAt') : ''}${mark.label} · ${info}` : info;
   } else {
     $('step').textContent = t('manual', { w: S.manual });
     $('stepNext').textContent = '';
@@ -164,7 +198,7 @@ function drawChart() {
   const ctx = chart.getContext('2d');
   ctx.clearRect(0, 0, w, h);
   const wk = S.workout;
-  if (!wk) return;
+  if (!wk) { if (S.route) drawProfile(ctx, w, h, S.route); return; }
   const max = Math.max(1.3, ...wk.segs.map((s) => Math.max(s.a, s.b))) ;
   let x = 0;
   for (const s of wk.segs) {
@@ -182,6 +216,46 @@ function drawChart() {
   ctx.strokeStyle = 'rgba(255,255,255,.5)'; ctx.setLineDash([6, 6]);
   const fy = h - (1 / max) * h;
   ctx.beginPath(); ctx.moveTo(0, fy); ctx.lineTo(w, fy); ctx.stroke(); // FTP 線
+}
+
+// 快轉預覽：30 → 120 → 480 km/h → 關閉（只在騎路線時出現）
+const PREVIEW = [0, 1, 4, 16];
+function cyclePreview() {
+  if (!S.route) return;
+  S.preview = PREVIEW[(PREVIEW.indexOf(S.preview) + 1) % PREVIEW.length];
+  if (S.preview && S.routeD >= S.route.total) S.routeD = 0; // 已在終點就從頭預覽
+  if (!S.preview) S.v = 0;
+  updateLabels();
+}
+$('btnPreview').onclick = cyclePreview;
+// 點或拖曳高度圖：跳到路線上的該位置（沒選課表時）
+chart.addEventListener('pointerdown', (e) => {
+  if (!S.route || S.workout) return;
+  const seek = (ev) => {
+    const b = chart.getBoundingClientRect();
+    S.routeD = Math.min(1, Math.max(0, (ev.clientX - b.left) / b.width)) * S.route.total;
+    if (!S.preview) S.v = 0;
+  };
+  seek(e);
+  chart.setPointerCapture(e.pointerId);
+  chart.onpointermove = (ev) => { if (ev.buttons) seek(ev); };
+  chart.onpointerup = () => { chart.onpointermove = chart.onpointerup = null; };
+});
+
+// 路線高度剖面（依坡度上色）與目前位置
+function drawProfile(ctx, w, h, R) {
+  let lo = Infinity, hi = -Infinity;
+  for (const e of R.ele) { lo = Math.min(lo, e); hi = Math.max(hi, e); }
+  const span = Math.max(30, hi - lo), n = R.s.length, bw = 2 * devicePixelRatio;
+  for (let px = 0; px < w; px += bw) {
+    const i = Math.min(n - 1, Math.round((px / w) * (n - 1)));
+    const hh = (0.12 + (0.83 * (R.ele[i] - lo)) / span) * h;
+    ctx.fillStyle = gradeColor(R.grade[i]);
+    ctx.fillRect(px, h - hh, bw + 0.5, hh);
+  }
+  const px = Math.min(1, S.routeD / R.total) * w;
+  ctx.fillStyle = 'rgba(0,0,0,.35)'; ctx.fillRect(0, 0, px, h);
+  ctx.fillStyle = '#fff'; ctx.fillRect(px - 1.5, 0, 3, h);
 }
 
 // ---------- 課表面板 ----------
@@ -289,24 +363,132 @@ function setView(v, instant) {
   document.querySelectorAll('[data-view]').forEach((b) => b.classList.toggle('on', b.dataset.view === v));
 }
 document.querySelectorAll('[data-view]').forEach((b) => (b.onclick = () => setView(b.dataset.view)));
-$('mapSel').value = world.map;
-$('mapSel').onchange = async (e) => {
-  const sel = e.target, map = sel.value;
+const setUrlMap = (map) => { const u = new URL(location.href); u.searchParams.set('map', map); history.replaceState(null, '', u); };
+const showCredit = () => {
+  const real = world.map === 'route' && S.route?.real;
+  $('osmCredit').textContent = t(real ? 'creditReal' : 'osm');
+  $('osmCredit').style.display = world.map === 'yuanshan' || (world.map === 'route' && S.route?.osm) ? 'block' : 'none';
+};
+async function switchMap(map) {
+  const sel = $('mapSel');
+  if (map === 'route') {
+    const e = routeEntries.find((x) => x.key === load('routeKey', null));
+    if (e) return selectRoute(e);
+    map = 'mountain';
+  }
+  S.route = null; updateLabels(); renderRoutes();
   sel.disabled = true; sel.blur();
   setStatus(() => t('mapLoading'));
   try {
     await world.setMap(map);
-    const u = new URL(location.href); u.searchParams.set('map', map); history.replaceState(null, '', u);
+    setUrlMap(map);
     setStatus(() => t('mapDone'));
   } catch (err) { console.warn('map', err); setStatus(() => t('mapFail', { e: err.message })); }
   sel.value = world.map; sel.disabled = false;
-  $('osmCredit').style.display = world.map === 'yuanshan' ? 'block' : 'none';
+  showCredit();
+}
+$('mapSel').value = world.map;
+$('mapSel').onchange = (e) => switchMap(e.target.value);
+showCredit();
+
+// ---------- 路線（GPX） ----------
+const routeEntries = []; // { key, name, nameEn, pts, osm, user, km, gain }
+function addRouteEntry(e) {
+  try { const r = buildRoute(e); e.km = r.total / 1000; e.gain = r.gain; } catch { return false; }
+  const i = routeEntries.findIndex((x) => x.key === e.key);
+  if (i >= 0) routeEntries[i] = e; else routeEntries.push(e);
+  return true;
+}
+async function loadRouteCatalog() {
+  for (const b of BUILTIN_ROUTES) {
+    try {
+      const g = parseGpx(await (await fetch(b.file)).text());
+      addRouteEntry({ key: 'b:' + b.file, name: b.name, nameEn: b.nameEn, pts: g.pts, osm: true, scene: b.scene });
+    } catch (err) { console.warn('route', b.file, err); }
+  }
+  for (const u of load('routes', [])) addRouteEntry({ ...u, user: true });
+  // routes/ 資料夾（個人路線，不進版本控制）
+  let html;
+  try { const r = await fetch('routes/', { cache: 'no-store' }); if (r.ok) html = await r.text(); } catch {}
+  let n = 0;
+  for (const f of html ? [...html.matchAll(/href="([^"?]+\.gpx)"/gi)].map((m) => decodeURIComponent(m[1])) : []) {
+    try {
+      const g = parseGpx(await (await fetch('routes/' + encodeURIComponent(f), { cache: 'no-store' })).text(), f);
+      if (addRouteEntry({ key: 'f:' + f, name: g.name, pts: g.pts })) n++;
+    } catch (err) { console.warn('route', f, err); }
+  }
+  if (n) setStatus(() => t('routesLoaded', { n }));
+  renderRoutes();
+}
+function renderRoutes() {
+  const list = $('routeList');
+  list.textContent = '';
+  for (const e of [{ key: null }, ...routeEntries]) {
+    const div = document.createElement('div');
+    div.className = 'item' + ((S.route?.key ?? null) === e.key ? ' sel' : '');
+    const info = document.createElement('div');
+    if (e.key) {
+      info.innerHTML = `<b></b><small>${e.km.toFixed(1)} km · ↑${Math.round(e.gain)} m</small>`;
+      info.firstChild.textContent = '📍 ' + wName(e);
+    } else info.innerHTML = `<b>${t('noRoute')}</b>`;
+    div.append(info);
+    div.onclick = () => { closePanel(); if (e.key) selectRoute(e); else if (S.route) switchMap('mountain'); };
+    if (e.user) {
+      const x = document.createElement('span');
+      x.className = 'x'; x.textContent = '✕';
+      x.onclick = (ev) => {
+        ev.stopPropagation();
+        routeEntries.splice(routeEntries.indexOf(e), 1);
+        store('routes', load('routes', []).filter((u) => u.key !== e.key));
+        renderRoutes();
+      };
+      div.append(x);
+    }
+    list.append(div);
+  }
+}
+async function selectRoute(e) {
+  const r = buildRoute(e);
+  r.key = e.key; r.osm = !!e.osm;
+  if (e.scene) { // 實景資料（地形、房屋、道路）
+    try { e.real ||= await (await fetch(e.scene)).json(); r.real = e.real; } catch (err) { console.warn('scene', err); }
+  }
+  S.route = r; S.routeD = 0; S.v = 0;
+  store('routeKey', e.key);
+  updateLabels(); renderRoutes();
+  const sel = $('mapSel');
+  sel.disabled = true;
+  setStatus(() => t('routeLoading'));
+  await new Promise((ok) => setTimeout(ok, 30)); // 先讓狀態文字顯示，再建場景
+  try {
+    await world.setRoute(r);
+    setUrlMap('route');
+    setStatus(() => t('routeReady', { n: wName(r), d: (r.total / 1000).toFixed(1), g: Math.round(r.gain) }));
+  } catch (err) { console.warn('route', err); setStatus(() => t('mapFail', { e: err.message })); }
+  sel.value = world.map; sel.disabled = false;
+  showCredit();
+}
+$('impGpx').onchange = async (e) => {
+  const saved = load('routes', []);
+  let lastKey = null;
+  for (const f of e.target.files) {
+    try {
+      const g = parseGpx(await f.text(), f.name);
+      const entry = { key: 'u:' + f.name, name: g.name, pts: compactPts(g.pts) };
+      if (!addRouteEntry({ ...entry, user: true })) throw new Error('GPX');
+      saved.splice(0, saved.length, ...saved.filter((u) => u.key !== entry.key), entry);
+      lastKey = entry.key;
+    } catch { alert(t('gpxErr', { f: f.name })); }
+  }
+  store('routes', saved);
+  e.target.value = '';
+  renderRoutes();
+  if (lastKey) { closePanel(); selectRoute(routeEntries.find((x) => x.key === lastKey)); }
 };
-if (world.map === 'yuanshan') $('osmCredit').style.display = 'block';
 // ---------- 語言 ----------
 applyI18n();
 $('btnLang').onclick = () => setLang(lang === 'zh' ? 'en' : 'zh');
-onLangChange(() => { updateLabels(); renderList(); $('status').textContent = statusFn(); updateHud(computeTarget().info); });
+onLangChange(() => { updateLabels(); renderList(); renderRoutes(); showCredit(); $('status').textContent = statusFn(); updateHud(computeTarget().info); });
 
 const KEYS = ['back', 'side', 'front', 'front34', 'top'];
 addEventListener('keydown', (e) => {
@@ -317,6 +499,7 @@ addEventListener('keydown', (e) => {
   else if (e.key === 'ArrowUp') adjust(5);
   else if (e.key === 'ArrowDown') adjust(-5);
   else if (e.key === 'l' || e.key === 'L') $('btnLang').click();
+  else if (e.key === 'p' || e.key === 'P') cyclePreview();
 });
 
 // ---------- 主迴圈 ----------
@@ -327,12 +510,22 @@ function frame(now) {
 
   const { watts, info } = computeTarget();
   S.target = Math.max(0, watts);
-  sendErg(S.target, info, now);
+  const R = S.route && world.map === 'route' ? S.route : null;
+  const grade = R ? routeAt(R, S.routeD).grade : 0;
+  // 有課表：ERG 依課表瓦數；只騎路線：SIM 依坡度（預覽快轉時設為平路）；都沒有：手動 ERG
+  if (R && !S.workout) trainer.setGrade(S.preview ? 0 : grade); else sendErg(S.target, info, now);
   if (S.sim && !trainer.connected) simulate(dt, S.target);
   if (!trainer.connected && !S.sim) { S.d.power = 0; S.d.cadence = 0; S.d.speed = 0; }
 
+  if (R) { // 路線：速度由功率與坡度決定（不用訓練台回報的速度）
+    const P = trainer.connected ? S.d.power : S.sim ? S.d.simPower ?? 0 : 0;
+    S.v = S.preview ? (30 / 3.6) * S.preview : ridePhysics(S.v, P, grade, dt);
+    S.d.speed = S.v * 3.6;
+    S.routeD = Math.min(R.total, S.routeD + (S.v * dt) / Math.hypot(1, grade / 100));
+    if (S.preview && S.routeD >= R.total) { S.preview = 0; S.v = 0; updateLabels(); } // 預覽到終點自動停止
+  }
   if (S.running) { S.t += dt; S.dist += (S.d.speed / 3600) * dt; }
-  world.update(dt, { speed: S.d.speed / 3.6, cadence: S.d.cadence });
+  world.update(dt, { speed: S.d.speed / 3.6, cadence: S.preview ? 90 : S.d.cadence, routeD: S.routeD });
   world.render();
 
   if (now - hudAt > 100) { hudAt = now; updateHud(info, now); }
@@ -342,6 +535,11 @@ function frame(now) {
 selectWorkout(null);
 renderList();
 scanWorkoutFolder();
+loadRouteCatalog().then(() => {
+  const g = new URLSearchParams(location.search).get('gpx'); // 測試用：?gpx=0 直接騎第 0 條路線
+  if (g != null && routeEntries[+g]) selectRoute(routeEntries[+g]);
+  else if (world.map === 'route') switchMap('route');
+});
 
 // 測試參數：?sim=1&view=side&hud=0&start=1
 const params = new URLSearchParams(location.search);
@@ -355,7 +553,7 @@ if (params.has('fps')) { // 效能量測：每 2 秒輸出平均 FPS 與繪製�
   requestAnimationFrame(tick);
 }
 if (params.has('route')) world.routeS = +params.get('route');
-if (params.has('wt')) window.__seek = (t) => { S.t = t; }; // 測試用：跳到課表某秒
+if (params.has('wt')) { window.__seek = (t) => { S.t = t; }; window.__routeD = (d) => { S.routeD = d; }; window.__world = world; } // 測試用：跳到課表某秒 / 路線某處
 if (params.has('crank')) world.crank = (+params.get('crank') * Math.PI) / 180;
 setStatus(() => t(bleSupported() ? 'idle' : 'noBleShort'));
 requestAnimationFrame(frame);

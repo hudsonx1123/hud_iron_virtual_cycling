@@ -29,6 +29,8 @@ export class Trainer {
     this.connected = false;
     this.writing = false;
     this.targetWatts = null;
+    this.mode = 'erg';       // 'erg'：固定瓦數；'sim'：依坡度模擬阻力
+    this.targetGrade = 0;    // %
     this.needControl = false;
     this.keepAliveTimer = null;
     this._indicationResolve = null;
@@ -63,6 +65,7 @@ export class Trainer {
       // 立即強制重新要求控制權並重送目標功率，瞬間把阻力拉回
       if (
         this.connected &&
+        this.mode === 'erg' &&
         this.targetWatts >= 100 &&
         data.cadence >= 50 &&
         data.power != null &&
@@ -130,12 +133,12 @@ export class Trainer {
     // 防止訓練台內建的 1.5~2 秒硬體 Watchdog 逾時而將阻力釋放回預設平路（80~90W）
     if (this.keepAliveTimer) clearInterval(this.keepAliveTimer);
     this.keepAliveTimer = setInterval(() => {
-      if (this.connected && this.targetWatts != null) {
+      if (this.connected && (this.mode === 'sim' || this.targetWatts != null)) {
         this._flush();
       }
     }, 800);
 
-    if (this.targetWatts != null) this._flush();
+    if (this.mode === 'sim' || this.targetWatts != null) this._flush();
   }
 
   async _sendCommand(bytes, waitMs = 250) {
@@ -166,15 +169,31 @@ export class Trainer {
   // ERG：Set Target Power (0x05, sint16 watts)
   setTargetPower(w) {
     w = Math.max(0, Math.min(2000, Math.round(w)));
-    const changed = this.targetWatts !== w;
+    const changed = this.targetWatts !== w || this.mode !== 'erg';
+    this.mode = 'erg';
     this.targetWatts = w;
     if (this.connected && changed) {
       this._flush();
     }
   }
 
+  // SIM：Set Indoor Bike Simulation Parameters (0x11)
+  // 風速 sint16 (0.001 m/s)、坡度 sint16 (0.01%)、滾動阻力 Crr uint8 (0.0001)、風阻係數 Cw uint8 (0.01 kg/m)
+  setGrade(g) {
+    g = Math.round(Math.max(-20, Math.min(20, g)) * 10) / 10;
+    const changed = this.targetGrade !== g || this.mode !== 'sim';
+    this.mode = 'sim';
+    this.targetGrade = g;
+    if (this.connected && changed) this._flush();
+  }
+
+  _simBytes() {
+    const g = Math.round(this.targetGrade * 100) & 0xffff;
+    return [0x11, 0, 0, g & 0xff, (g >> 8) & 0xff, 40, 51];
+  }
+
   async _flush() {
-    if (!this.connected || this.writing || this.targetWatts == null) return;
+    if (!this.connected || this.writing || (this.mode === 'erg' && this.targetWatts == null)) return;
     this.writing = true;
     try {
       if (this.needControl) {
@@ -182,16 +201,17 @@ export class Trainer {
         await this._sendCommand([0x00], 200).catch(() => {});
       }
       const w = this.targetWatts;
-      const resp = await this._sendCommand([0x05, w & 0xff, (w >> 8) & 0xff], 200);
+      const cmd = this.mode === 'sim' ? this._simBytes() : [0x05, w & 0xff, (w >> 8) & 0xff];
+      const resp = await this._sendCommand(cmd, 200);
       // 若訓練台回覆 0x05 (Control Not Permitted)，立即重新要求控制權並重送目標瓦數
       if (resp && resp.res === 0x05) {
         this.needControl = false;
         await this._sendCommand([0x00], 200).catch(() => {});
         await this._sendCommand([0x07], 200).catch(() => {});
-        await this._sendCommand([0x05, w & 0xff, (w >> 8) & 0xff], 200);
+        await this._sendCommand(cmd, 200);
       }
     } catch (e) {
-      console.warn('FTMS setTargetPower failed', e);
+      console.warn('FTMS control write failed', e);
     } finally {
       this.writing = false;
     }

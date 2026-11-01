@@ -14,3 +14,9 @@ node_modules/
 # 個人課表（自動載入用，不公開）
 workout/*
 !workout/.gitkeep
+
+# 個人 GPX 路線（自動載入用，不公開；內建範例放 assets/routes/）
+routes/*
+!routes/.gitkeep
+
+__pycache__/

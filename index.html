@@ -34,7 +34,8 @@
   #right .tile b { font-size: 11vmin; }
 
   #bottom { position: fixed; left: 1.5vmin; right: 1.5vmin; bottom: 1.5vmin; display: flex; flex-direction: column; gap: 1vmin; }
-  #chart { width: 100%; height: 9vmin; background: var(--bg); border-radius: 1.2vmin; display: block; }
+  #chart { width: 100%; height: 9vmin; background: var(--bg); border-radius: 1.2vmin; display: block; touch-action: none; }
+  #chart.seek { cursor: pointer; }
   #bar { display: flex; gap: 1vmin; flex-wrap: wrap; align-items: center; }
   button, select, input { font: inherit; }
   #mapSel { background: var(--bg); color: var(--fg); border: 0; border-radius: 1vmin; padding: 1.2vmin 1.4vmin; font-size: 2.4vmin; font-weight: 700; }
@@ -46,7 +47,7 @@
   .sp { flex: 1; }
   body.nohud #top, body.nohud #left, body.nohud #right, body.nohud #bottom { display: none; }
   #status { font-size: 2vmin; color: var(--dim); flex: 1 1 0; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  #impFile { display: none; }
+  #impFile, #impGpx { display: none; }
   label.btn { display: inline-block; background: #1b2230; border: 1px solid #38445a; color: var(--fg); border-radius: 1vmin; padding: 1vmin 2vmin; font-size: 2.2vmin; font-weight: 700; cursor: pointer; }
 
   #panel { position: fixed; top: 0; right: 0; bottom: 0; width: min(46vmin, 92vw); transform: translateX(105%);
@@ -82,7 +83,7 @@
 
 <div id="left">
   <div class="tile" id="power"><label data-i18n="power">功率 POWER</label><b id="powerV">--<small>W</small></b></div>
-  <div class="tile" id="target"><span data-i18n="ergTarget">ERG 目標</span> <span id="tgt">--</span> W</div>
+  <div class="tile" id="target"><span id="tgtLabel">ERG 目標</span> <span id="tgt">--</span> <span id="tgtUnit">W</span></div>
   <div id="adj">
     <button data-adj="-10">−10W</button><button data-adj="-5">−5</button>
     <button data-adj="5">+5</button><button data-adj="10">+10W</button>
@@ -108,8 +109,9 @@
     <button data-view="front" data-i18n="vFront">前方 3</button>
     <button data-view="front34" data-i18n="vFront34">前斜 4</button>
     <button data-view="top" data-i18n="vTop">上空 5</button>
+    <button id="btnPreview" data-i18n-title="previewTitle" hidden>⏩</button>
     <button id="btnPanel" data-i18n="workouts">📅 課表</button>
-    <select id="mapSel" title="場景" data-i18n-title="scene"><option value="mountain" data-i18n="mapMountain">🌲 山路</option><option value="yuanshan" data-i18n="mapYuanshan">🏙 圓山交流道</option></select>
+    <select id="mapSel" title="場景" data-i18n-title="scene"><option value="mountain" data-i18n="mapMountain">🌲 山路</option><option value="yuanshan" data-i18n="mapYuanshan">🏙 圓山交流道</option><option value="route" id="mapRoute" hidden>📍</option></select>
     <button id="btnLang" data-i18n="langBtn" data-i18n-title="langTitle">EN</button>
   </div>
 </div>
@@ -127,28 +129,35 @@
   <div class="row"><span data-i18n="date">日期</span> <input type="date" id="impDate"></div>
   <label class="btn"><span data-i18n="chooseFile">📂 選擇課表檔</span><input type="file" id="impFile" accept=".zwo,.mrc,.erg,.json" multiple></label>
   <p class="hint" data-i18n-html="importHint">把 TrainingPeaks 匯出的 .erg / .mrc / .zwo 放進專案的 <b>workout</b> 資料夾，開啟時會自動載入，檔名開頭的日期（如 2026-10-24_…）即課表日期。也可以用上面的按鈕手動匯入。</p>
+  <h3 style="margin-top:2vmin" data-i18n="routes">路線</h3>
+  <div id="routeList"></div>
+  <label class="btn"><span data-i18n="importGpx">📂 匯入 GPX</span><input type="file" id="impGpx" accept=".gpx" multiple></label>
+  <p class="hint" data-i18n-html="routeHint"></p>
 </aside>
 
-<div id="osmCredit" style="display:none;position:fixed;right:1vmin;bottom:0.3vmin;font-size:1.4vmin;color:#fff;opacity:.7;text-shadow:0 0 3px #000" data-i18n="osm">地圖資料 © OpenStreetMap contributors</div>
+<div id="osmCredit" style="display:none;position:fixed;right:1vmin;bottom:0.3vmin;font-size:1.4vmin;color:#fff;opacity:.7;text-shadow:0 0 3px #000">地圖資料 © OpenStreetMap contributors</div>
 <!-- 版本號：修改 js 後遞增，確保瀏覽器不會用到快取的舊模組 -->
 <script type="importmap">
 { "imports": {
   "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
   "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
-  "./js/bike.js": "./js/bike.js?v=2026102409",
-  "./js/ble.js": "./js/ble.js?v=2026102409",
-  "./js/body.js": "./js/body.js?v=2026102409",
-  "./js/city.js": "./js/city.js?v=2026102409",
-  "./js/geom.js": "./js/geom.js?v=2026102409",
-  "./js/main.js": "./js/main.js?v=2026102409",
-  "./js/rider.js": "./js/rider.js?v=2026102409",
-  "./js/riderModel.js": "./js/riderModel.js?v=2026102409",
-  "./js/trees.js": "./js/trees.js?v=2026102409",
-  "./js/i18n.js": "./js/i18n.js?v=2026102409",
-  "./js/workout.js": "./js/workout.js?v=2026102409",
-  "./js/world.js": "./js/world.js?v=2026102409"
+  "./js/bike.js": "./js/bike.js?v=2026110129",
+  "./js/ble.js": "./js/ble.js?v=2026110129",
+  "./js/body.js": "./js/body.js?v=2026110129",
+  "./js/city.js": "./js/city.js?v=2026110129",
+  "./js/geom.js": "./js/geom.js?v=2026110129",
+  "./js/main.js": "./js/main.js?v=2026110129",
+  "./js/rider.js": "./js/rider.js?v=2026110129",
+  "./js/realScene.js": "./js/realScene.js?v=2026110129",
+  "./js/route.js": "./js/route.js?v=2026110129",
+  "./js/routeScene.js": "./js/routeScene.js?v=2026110129",
+  "./js/riderModel.js": "./js/riderModel.js?v=2026110129",
+  "./js/trees.js": "./js/trees.js?v=2026110129",
+  "./js/i18n.js": "./js/i18n.js?v=2026110129",
+  "./js/workout.js": "./js/workout.js?v=2026110129",
+  "./js/world.js": "./js/world.js?v=2026110129"
 } }
 </script>
-<script type="module" src="./js/main.js?v=2026102409"></script>
+<script type="module" src="./js/main.js?v=2026110129"></script>
 </body>
 </html>
